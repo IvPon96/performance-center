@@ -10,7 +10,17 @@ st.set_page_config(page_title="HITL Performance Center", layout="wide")
 def format_seconds(seconds):
     return str(timedelta(seconds=int(seconds)))
 
-# --- SEGURIDAD: SIMPLE LOGIN ---
+# Función para convertir talk_duration (float minutos) a mm:ss
+def format_talk_duration(minutes_float):
+    try:
+        total_seconds = float(minutes_float) * 60
+        minutes = int(total_seconds // 60)
+        seconds = int(total_seconds % 60)
+        return f"{minutes}m {seconds}s"
+    except:
+        return "0m 0s"
+
+# --- SEGURIDAD ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.sidebar.text_input("Enter Password", type="password", on_change=password_entered, key="password")
@@ -38,13 +48,15 @@ if check_password():
         url = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}'
         df = pd.read_csv(url)
         df.columns = df.columns.str.strip()
+        
+        # Convertir fechas
         df['Inicio_Mx'] = pd.to_datetime(df['Inicio_Mx'], errors='coerce')
         df['Fin_Mx'] = pd.to_datetime(df['Fin_Mx'], errors='coerce')
         
-        # Calcular duración de la llamada en formato mm:ss para el hover
-        df['Duration'] = (df['Fin_Mx'] - df['Inicio_Mx']).dt.total_seconds().fillna(0)
-        df['Duration_Formatted'] = df['Duration'].apply(lambda x: f"{int(x//60)}m {int(x%60)}s")
+        # Formatear talk_duration para el visual
+        df['Talk_Time_Display'] = df['talk_duration'].apply(format_talk_duration)
         
+        # Inactividad
         df['Time_Elapsed (Secs)'] = pd.to_numeric(df['Time_Elapsed (Secs)'], errors='coerce').fillna(0)
         df['SOS_EOS (Secs)'] = pd.to_numeric(df['SOS_EOS (Secs)'], errors='coerce').fillna(0)
         return df
@@ -55,49 +67,43 @@ if check_password():
     st.title("📊 HITL Performance Center")
     st.markdown("---")
 
-    # Sidebar: Control Panel
     st.sidebar.header("Control Panel")
     fecha_default = df['Inicio_Mx'].max().date() if not df['Inicio_Mx'].isnull().all() else pd.to_datetime("today").date()
     fecha_sel = st.sidebar.date_input("Audit Date", fecha_default)
 
-    # Filtrado
+    # Filtrado: Solo Outbound (puedes añadir aquí check de connected si gustas)
     df_clean = df[df['categories'].fillna('').str.contains('Inbound', case=False) == False].copy()
     df_dia = df_clean[df_clean['Inicio_Mx'].dt.date == fecha_sel].copy()
 
     if not df_dia.empty:
-        # --- CÁLCULOS PARA KPIs ---
+        # --- KPIs ---
         total_calls = len(df_dia)
         most_active_agent = df_dia['CALC_Full'].value_counts().idxmax()
-        
-        # Promedio de inactividad formateado a HH:MM:SS
         avg_inactive_secs = (df_dia.groupby('CALC_Full')['Time_Elapsed (Secs)'].sum() + 
                              df_dia.groupby('CALC_Full')['SOS_EOS (Secs)'].sum()).mean()
-        avg_inactive_formatted = format_seconds(avg_inactive_secs)
 
-        # --- KPI CARDS ---
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Calls (Outbound)", total_calls)
         col2.metric("Most Active Agent", most_active_agent)
-        col3.metric("Avg. Inactive Time / Agent", avg_inactive_formatted)
+        col3.metric("Avg. Inactive Time / Agent", format_seconds(avg_inactive_secs))
 
-        # --- PREPARACIÓN DE ETIQUETAS ---
+        # --- LABELS EJE Y ---
         stats_agente = df_dia.groupby('CALC_Full').agg(
             Connected=('date_connected', 'count'),
             Total_Inactive=('Time_Elapsed (Secs)', lambda x: (x.sum() + df_dia.loc[x.index, 'SOS_EOS (Secs)'].sum()))
         ).reset_index()
 
         df_dia = df_dia.merge(stats_agente, on='CALC_Full')
-        # Labels del eje Y más oscuros y detallados
         df_dia['Chart_Label'] = (
             "<b>" + df_dia['CALC_Full'] + "</b>" + 
-            "<br><span style='color:#333333;'>Calls: " + df_dia['Connected'].astype(str) + 
+            "<br><span style='color:#1A1A1A;'>Calls: " + df_dia['Connected'].astype(str) + 
             " | Idle: " + df_dia['Total_Inactive'].apply(format_seconds) + "</span>"
         )
 
-        # --- PULSÓMETRO (SOBER THEME) ---
+        # --- PULSÓMETRO ---
         st.subheader(f"Activity Pulse Monitor - {fecha_sel}")
         
-        # Definimos los datos del Hover con nombres personalizados
+        # Creamos el gráfico asegurando el orden de custom_data para el hover
         fig = px.timeline(
             df_dia,
             x_start="Inicio_Mx",
@@ -105,44 +111,47 @@ if check_password():
             y="Chart_Label",
             color="CALC_Full",
             hover_data={
-                "Chart_Label": False,      # Ocultamos el label repetido
-                "CALC_Full": True,         # Se renombrará abajo
+                "Chart_Label": False,
+                "CALC_Full": True,
                 "Inicio_Mx": "| %H:%M:%S",
                 "Fin_Mx": "| %H:%M:%S",
-                "Duration_Formatted": True,
-                "external_number": True
+                "Talk_Time_Display": True,  # customdata[0]
+                "external_number": True     # customdata[1]
             },
             template="plotly_white"
         )
 
-        # Renombrar etiquetas en el hover
+        # Corregimos el Hover Template con los nombres correctos
         fig.update_traces(
-            hovertemplate="<b>Full Name:</b> %{y}<br>" +
+            hovertemplate="<b>Full Name:</b> %{customdata[2]}<br>" + # Plotly mete CALC_Full aquí
                           "<b>Time Started:</b> %{base|%H:%M:%S}<br>" +
                           "<b>Time Finished:</b> %{x|%H:%M:%S}<br>" +
                           "<b>Call Duration:</b> %{customdata[0]}<br>" +
                           "<b>Dialed Number:</b> %{customdata[1]}<extra></extra>"
         )
 
-        # Ajustes estéticos (Sober Look)
-        fig.update_yaxes(
-            title="Agent Performance Details", 
-            autorange="reversed",
-            tickfont=dict(color="#1A1A1A", size=12), # Nombres más oscuros
-            title_font=dict(color="#000000", size=14)
-        )
+        # --- SEPARADORES POR HORA Y ESTILO ---
         fig.update_xaxes(
             title="Shift Timeline (24h Format)", 
             tickformat="%H:%M",
-            tickfont=dict(color="#1A1A1A"),
-            title_font=dict(color="#000000")
+            dtick=3600000, # Una marca cada hora (en milisegundos)
+            showgrid=True, 
+            gridwidth=1, 
+            gridcolor='#EAEAEA', # Gris suave para los separadores
+            tickfont=dict(color="#000000")
+        )
+        
+        fig.update_yaxes(
+            title="Agent Performance Details", 
+            autorange="reversed",
+            tickfont=dict(color="#000000", size=12)
         )
         
         fig.update_layout(
             height=600,
             showlegend=False,
-            paper_bgcolor="#F2F2F2", # Gris muy suave (sober background)
-            plot_bgcolor="#FFFFFF",  # Fondo de la gráfica blanco para contraste
+            paper_bgcolor="#F8F9FA", # Fondo sobrio
+            plot_bgcolor="#FFFFFF",
             margin=dict(l=20, r=20, t=50, b=20)
         )
 
