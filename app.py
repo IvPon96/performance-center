@@ -23,7 +23,7 @@ def check_password():
         return True
 
 def password_entered():
-    if st.session_state["password"] == "hitl2026":
+    if st.session_state["password"] == "TruckSmarter2026":
         st.session_state["password_correct"] = True
         del st.session_state["password"]
     else:
