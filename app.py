@@ -14,7 +14,7 @@ def load_data():
     df = pd.read_csv(url)
     df.columns = df.columns.str.strip()
     df['Inicio_Mx'] = pd.to_datetime(df['Inicio_Mx'], errors='coerce')
-    df{'Fin_Mx'] = pd.to_datetime(df['Fin_Mx'], errors='coerce')
+    df['Fin_Mx'] = pd.to_datetime(df['Fin_Mx'], errors='coerce')
     return df
 
 # Cargar la data
