@@ -3,12 +3,12 @@ import pandas as pd
 import plotly.express as px
 
 # Configuración de la página
-st.set_page_config(page_title = "HITL Performance Center", layout = "Wide")
+st.set_page_config(page_title = "HITL Performance Center", layout = "wide")
 
 # Función para cargar datos
 @st.cache_data
 def load_data():
-    SHEET_ID: '1fc2KZftpvGLRxAqb8VaT1S2cV1VuVA83ZwXKWWkuLLk'
+    SHEET_ID = '1fc2KZftpvGLRxAqb8VaT1S2cV1VuVA83ZwXKWWkuLLk'
     GID = 395674968
     url = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}'
     df = pd.read_csv(url)
@@ -30,7 +30,7 @@ fecha_default = df['Inicio_Mx'].max().date() if not df ['Inicio_Mx'].isnull().al
 fecha_sel = st.sidebar.date_input("Selecciona el día a auditar", fecha_default)
 
 #Lógica de filtrado
-df_clean = df[df['categories'.fillna('').str.contains('Inbound', case=False) == False].copy()
+df_clean = df[df['categories'].fillna('').str.contains('Inbound', case=False) == False].copy()
 df_dia = df_clean[df_clean['Inicio_Mx'].dt.date == fecha_sel].copy()
 
 # --- Visuals ---
@@ -43,8 +43,8 @@ if not df_dia.empty:
       x_end = "Fin_Mx",
       y = "CALC_Full",
       color = "CALC_Full",
-      hover_data = {"Inicio_Mx": "| %H:%M:%S", "Fin_Mx": "| %H:$M:%S"},
-      template = "Plotly_white"
+      hover_data = {"Inicio_Mx": "| %H:%M:%S", "Fin_Mx": "| %H:%M:%S"},
+      template = "plotly_white"
   )
 
   fig.update_yaxes(title = "Agentes", autorange = "reversed")
