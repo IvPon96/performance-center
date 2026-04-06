@@ -1,4 +1,4 @@
-# v 2.12
+# v 2.14 - Fixed Order & Clean Debug
 
 import streamlit as st
 import pandas as pd
@@ -10,7 +10,6 @@ st.set_page_config(page_title="HITL Performance Center", layout="wide")
 
 def format_seconds(seconds):
     if pd.isna(seconds) or seconds <= 0: return "0:00:00"
-    # Convertimos a HH:MM:SS quitando los microsegundos
     return str(timedelta(seconds=int(seconds)))
 
 # --- 2. SECURITY ---
@@ -34,7 +33,6 @@ def password_entered():
 # --- 3. DATA ENGINE ---
 @st.cache_data(ttl=600)
 def load_and_process():
-    # ... (Mantenemos la carga de datos igual hasta el cálculo de Offset) ...
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
     GID_DB = '0' 
     GID_DIM = '1947121871'
@@ -71,48 +69,48 @@ def load_and_process():
     df = df[df['Inicio_Mx'] >= df['production_floor']].copy()
     df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
 
-    # --- NUEVA LÓGICA DE SOS / EOS ---
+    # --- LÓGICA DE TIEMPOS ---
     df = df.sort_values(['Full_Name', 'Inicio_Mx'])
     
-    # 1. Definir Entrada y Salida Teórica según DST
-    # Si Offset es 1 (DST) -> 7am a 4pm. Si es 2 (Standard) -> 8am a 5pm.
+    # 1. Talk Time (MOVIDO ARRIBA para que esté disponible para los cálculos)
+    df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
+    df['Talk_Formatted'] = df['Talk_Secs'].apply(format_seconds)
+
+    # 2. Definir Horarios según DST
     df['Shift_Start_Hour'] = df['Offset'].map({1: 7, 2: 8})
     df['Shift_End_Hour'] = df['Offset'].map({1: 16, 2: 17})
 
-    # 2. Calcular Gaps entre llamadas (In-between)
+    # 3. Gaps entre llamadas
     df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
     df['In_Between_Idle'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
 
-    # 3. Calcular SOS (Diferencia en la PRIMERA llamada del día)
-    # Identificamos la primera llamada
+    # 4. SOS (Start of Shift)
     df['is_first'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='first')
     
     def calculate_sos(row):
         if row['is_first']:
             theoretical_start = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Shift_Start_Hour'])
             gap = (row['Inicio_Mx'] - theoretical_start).total_seconds()
-            return max(0, gap) # Si empezó antes de su hora, es 0 idle
+            return max(0, gap)
         return 0
 
     df['SOS_Idle'] = df.apply(calculate_sos, axis=1)
 
-    # 4. Calcular EOS (Diferencia en la ÚLTIMA llamada del día)
+    # 5. EOS (End of Shift)
     df['is_last'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='last')
 
     def calculate_eos(row):
         if row['is_last']:
             theoretical_end = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Shift_End_Hour'])
             gap = (theoretical_end - row['Fin_Mx']).total_seconds()
-            return max(0, gap) # Si terminó después de su hora, es 0 idle
+            return max(0, gap)
         return 0
 
     df['EOS_Idle'] = df.apply(calculate_eos, axis=1)
 
-    # 5. Idle Total = SOS + In-Between + EOS
+    # 6. Consolidación Final
     df['Idle_Secs'] = df['In_Between_Idle'] + df['SOS_Idle'] + df['EOS_Idle']
-    
-    df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
-    df['Talk_Formatted'] = df['Talk_Secs'].apply(format_seconds)
+    df['Total_Talk_Secs'] = df.groupby(['Full_Name', 'Date_Only'])['Talk_Secs'].transform('sum')
     
     return df
 
@@ -126,23 +124,26 @@ if check_password():
 
         st.sidebar.header("Control Panel")
         max_date = data['Date_Only'].max()
-        # Selector tipo Calendario
         date_sel = st.sidebar.date_input("Select Audit Date", max_date)
 
         df_dia = data[data['Date_Only'] == date_sel].copy()
 
         if not df_dia.empty:
-            # KPIs
+            # --- KPIs ---
             total_calls = len(df_dia)
             most_active = df_dia['Full_Name'].value_counts().idxmax()
-            avg_idle = df_dia.groupby('Full_Name')['Idle_Secs'].sum().mean()
+            
+            # Promedios por agente
+            total_idle_secs = df_dia.groupby('Full_Name')['Idle_Secs'].sum().mean()
+            total_talk_secs = df_dia.groupby('Full_Name')['Talk_Secs'].sum().mean()
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Calls", total_calls)
+            c2.metric("Avg. Idle Time", format_seconds(total_idle_secs))
+            c3.metric("Avg. Talk Time", format_seconds(total_talk_secs))
+            c4.metric("Total Accounted", format_seconds(total_idle_secs + total_talk_secs))
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Calls (Outbound)", total_calls)
-            c2.metric("Top Performer", most_active)
-            c3.metric("Avg. Idle Time", format_seconds(avg_idle))
-
-            # Etiquetas en el eje Y (Negrita Forzada)
+            # Visualización del gráfico
             stats = df_dia.groupby('Full_Name').agg(
                 Conn=('date_connected', 'count'),
                 Idle=('Idle_Secs', 'sum')
@@ -158,57 +159,24 @@ if check_password():
             st.subheader(f"Activity Pulse Monitor - {date_sel}")
             
             fig = px.timeline(
-                df_dia, 
-                x_start="Inicio_Mx", 
-                x_end="Fin_Mx", 
-                y="Chart_Label", 
-                color="Full_Name", 
+                df_dia, x_start="Inicio_Mx", x_end="Fin_Mx", y="Chart_Label", color="Full_Name", 
                 template="plotly_white",
-                hover_data={
-                    "Chart_Label": False, 
-                    "Full_Name": True,        # customdata[0]
-                    "Talk_Formatted": True,   # customdata[1] <-- NUEVO FORMATO
-                    "external_number": True,  # customdata[2]
-                    "Inicio_Mx": False, 
-                    "Fin_Mx": False
-                }
+                hover_data={"Chart_Label": False, "Full_Name": True, "Talk_Formatted": True, "external_number": True}
             )
 
-            # Ajuste de Hover con formato de tiempo
             fig.update_traces(
-                hovertemplate="<b>Agent:</b> %{customdata[0]}<br>" +
-                              "<b>Time Started:</b> %{base|%H:%M:%S}<br>" +
-                              "<b>Time Finished:</b> %{x|%H:%M:%S}<br>" +
-                              "<b>Talk Duration:</b> %{customdata[1]}<br>" + # Ya viene formateado
-                              "<b>Dialed Number:</b> %{customdata[2]}<extra></extra>"
+                hovertemplate="<b>Agent:</b> %{customdata[0]}<br><b>Started:</b> %{base|%H:%M:%S}<br><b>Finished:</b> %{x|%H:%M:%S}<br><b>Talk:</b> %{customdata[1]}<br><b>Dialed:</b> %{customdata[2]}<extra></extra>"
             )
 
-            # Estética Sobria con Títulos y Negritas
             fig.update_layout(
-                height=650, 
-                showlegend=False, 
-                paper_bgcolor="#E5E7E9", 
-                plot_bgcolor="white",
-                font=dict(color="black"),
+                height=650, showlegend=False, paper_bgcolor="#E5E7E9", plot_bgcolor="white",
                 xaxis_title="<b>Shift Timeline (24h Format)</b>",
                 yaxis_title="<b>Agents Performance Details</b>",
                 margin=dict(l=20, r=20, t=50, b=80) 
             )
 
-            fig.update_xaxes(
-                dtick=3600000, 
-                tickformat="%H:%M", 
-                showgrid=True, 
-                gridcolor='rgba(0,0,0,0.1)',
-                tickfont=dict(color="black", size=12, family="Arial Black"),
-                side="bottom" # Asegura que las horas estén abajo
-            )
-
-            fig.update_yaxes(
-                autorange="reversed", 
-                tickfont=dict(color="black", size=12),
-                title_font=dict(size=14, family="Arial Black")
-            )
+            fig.update_xaxes(dtick=3600000, tickformat="%H:%M", showgrid=True, gridcolor='rgba(0,0,0,0.1)', tickfont=dict(color="black", size=12, family="Arial Black"))
+            fig.update_yaxes(autorange="reversed", tickfont=dict(color="black", size=12))
             
             st.plotly_chart(fig, use_container_width=True)
             
@@ -217,27 +185,6 @@ if check_password():
             show_debug = st.sidebar.checkbox("🔍 Open the Black Box (Debug View)")
 
             if show_debug:
-                st.markdown("---")
                 st.subheader("🕵️ Inside the Machine: Virtual Data Inspection")
-                st.write(f"Esta es la tabla 'fantasma' que Python generó en memoria para el día **{date_sel}**:")
                 
-                # Columnas para auditar la lógica
-                debug_cols = [
-                    'Full_Name', 'Inicio_Mx', 'Fin_Mx', 'Offset', 
-                    'In_Between_Idle', 'SOS_Idle', 'EOS_Idle', 'Idle_Secs',
-                    'is_first', 'is_last'
-                ]
-                
-                # Mostramos el DataFrame procesado
-                st.dataframe(df_dia[debug_cols].sort_values('Inicio_Mx'), use_container_width=True)
-                
-                st.info("""
-                **Guía de Auditoría:**
-                * **is_first / SOS_Idle**: Si es la primera llamada, aquí verás el tiempo desde la entrada (7/8 AM) hasta que marcó.
-                * **In_Between_Idle**: Es el 'gap' entre esta llamada y la anterior.
-                * **is_last / EOS_Idle**: Si es la última, verás el tiempo que sobró hasta el fin de turno (4/5 PM).
-                """)
-        else:
-            st.warning(f"No records found for {date_sel}.")
-    else:
-        st.error("Connection error or empty dataset.")
+                # Res
