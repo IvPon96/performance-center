@@ -1,13 +1,12 @@
 # v 2.17 - Modular Home (Fleet View)
 import streamlit as st
 import plotly.express as px
-# IMPORTANTE: Aquí importamos las funciones desde tu nuevo archivo
 from data_engine import load_and_process, format_seconds
 
 # --- 1. SETTINGS ---
 st.set_page_config(page_title="HITL Performance Center", layout="wide")
 
-# --- 2. SECURITY (Se queda en app.py para controlar el acceso principal) ---
+# --- 2. SECURITY ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.sidebar.text_input("Enter Password", type="password", on_change=password_entered, key="password")
@@ -27,7 +26,6 @@ def password_entered():
 
 # --- 3. INTERFAZ PRINCIPAL ---
 if check_password():
-    # LLAMADA AL MOTOR (Carga y procesa todo en una sola línea)
     data = load_and_process()
     
     if data is not None and not data.empty:
@@ -38,7 +36,6 @@ if check_password():
         max_date = data['Date_Only'].max()
         date_sel = st.sidebar.date_input("Select Audit Date", max_date)
 
-        # Filtrado para la vista del día
         df_dia = data[data['Date_Only'] == date_sel].copy()
 
         if not df_dia.empty:
