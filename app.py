@@ -1,9 +1,9 @@
-#v 3.1
+# v 3.2
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 # 1. Configuración de la página
 st.set_page_config(page_title="HITL Performance Center", layout="wide")
@@ -27,6 +27,7 @@ def check_password():
         return True
 
 def password_entered():
+    # CAMBIA 'TruckSmarter2026' por la contraseña que tú quieras
     if st.session_state["password"] == "TruckSmarter2026":
         st.session_state["password_correct"] = True
         del st.session_state["password"]
@@ -34,35 +35,62 @@ def password_entered():
         st.session_state["password_correct"] = False
 
 if check_password():
-    # --- CARGA DE DATOS ---
+    # --- CARGA Y TRANSFORMACIÓN DE DATOS (ETL EN MEMORIA) ---
     @st.cache_data
-    def load_data():
+    def load_and_process_data():
         SHEET_ID = '1fc2KZftpvGLRxAqb8VaT1S2cV1VuVA83ZwXKWWkuLLk'
         GID = 395674968
+        # Esta URL exporta DB_Dialpad como CSV puro, sin fórmulas
         url = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}'
-        df = pd.read_csv(url)
-        df.columns = df.columns.str.strip()
         
-        # Conversión de tiempos
-        df['Inicio_Mx'] = pd.to_datetime(df['Inicio_Mx'], errors='coerce')
-        df['Fin_Mx'] = pd.to_datetime(df['Fin_Mx'], errors='coerce')
+        try:
+            df = pd.read_csv(url)
+        except Exception:
+            # En caso de que Google Sheets esté ocupado, pedimos reintentar
+            st.error("Google Sheets is busy. Please refresh in a few seconds.")
+            return pd.DataFrame()
+
+        df.columns = df.columns.str.strip()
+
+        # Conversión de tiempos originales (Pacific Time de Dialpad)
+        df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
+        df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
+
+        # --- LÓGICA DE MIGRACIÓN: MÉXICO TIME ---
+        # Si la llamada es entre el 2do dom de Marzo y el 1er dom de Noviembre, sumamos 1h, si no 2h.
+        
+        def calculate_offset(dt):
+            year = dt.year
+            # DST: 2do domingo Marzo al 1er domingo Noviembre (Aproximación lógica)
+            dst_start = datetime(year, 3, 8) + timedelta(days=(6 - datetime(year, 3, 8).weekday()) + 7)
+            dst_end = datetime(year, 11, 1) + timedelta(days=(6 - datetime(year, 11, 1).weekday()))
+            if pd.isna(dt) or dst_start <= dt < dst_end:
+                return 1 # DST sumamos 1
+            return 2 # Standard sumamos 2
+
+        # Calculamos el ajuste de horas basado en la fecha
+        df['Offset'] = df['date_started'].apply(calculate_offset)
+        
+        # Creamos Inicio_Mx y Fin_Mx al vuelo
+        df['Inicio_Mx'] = df['date_started'] + pd.to_timedelta(df['Offset'], unit='h')
+        df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
         
         # talk_duration viene en minutos decimales (0.71), lo pasamos a segundos
         df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
         df['Talk_Formatted'] = df['Talk_Secs'].apply(format_seconds)
         
-        # Métricas de inactividad
-        df['Time_Elapsed (Secs)'] = pd.to_numeric(df['Time_Elapsed (Secs)'], errors='coerce').fillna(0)
-        df['SOS_EOS (Secs)'] = pd.to_numeric(df['SOS_EOS (Secs)'], errors='coerce').fillna(0)
+        # Métricas de inactividad (Gaps)
+        df['Time_Elapsed (Secs)'] = pd.to_numeric(df['time_elapsed'], errors='coerce').fillna(0)
+        df['SOS_EOS (Secs)'] = pd.to_numeric(df['sos_eos'], errors='coerce').fillna(0)
         return df
 
-    df = load_data()
+    df = load_and_process_data()
 
     # --- INTERFAZ ---
     st.title("📊 HITL Performance Center")
     st.markdown("---")
 
-    # Sidebar
+    # Sidebar: Control Panel
     st.sidebar.header("Control Panel")
     fecha_default = df['Inicio_Mx'].max().date() if not df['Inicio_Mx'].isnull().all() else pd.to_datetime("today").date()
     fecha_sel = st.sidebar.date_input("Audit Date", fecha_default)
@@ -75,13 +103,16 @@ if check_password():
         # --- KPI CARDS ---
         total_calls = len(df_dia)
         most_active_agent = df_dia['CALC_Full'].value_counts().idxmax()
+        
+        # Promedio de inactividad formateado a HH:MM:SS
         avg_inactive_secs = (df_dia.groupby('CALC_Full')['Time_Elapsed (Secs)'].sum() + 
                              df_dia.groupby('CALC_Full')['SOS_EOS (Secs)'].sum()).mean()
+        avg_inactive_formatted = format_seconds(avg_inactive_secs)
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Calls (Outbound)", total_calls)
         col2.metric("Most Active Agent", most_active_agent)
-        col3.metric("Avg. Inactive Time / Agent", format_seconds(avg_inactive_secs))
+        col3.metric("Avg. Inactive Time / Agent", avg_inactive_formatted)
 
         # --- LABELS Y ESTADÍSTICAS ---
         stats_agente = df_dia.groupby('CALC_Full').agg(
@@ -98,7 +129,7 @@ if check_password():
             " | Idle: " + df_dia['Total_Idle_Secs'].apply(format_seconds) + "</span>"
         )
 
-        # --- PULSÓMETRO ---
+        # --- PULSÓMETRO (SOBER & PRECISE) ---
         st.subheader(f"Activity Pulse Monitor - {fecha_sel}")
         
         fig = px.timeline(
@@ -108,8 +139,8 @@ if check_password():
             y="Chart_Label",
             color="CALC_Full",
             hover_data={
-                "Chart_Label": False,
-                "CALC_Full": True,
+                "Chart_Label": False,      # Ocultamos el label repetido
+                "CALC_Full": True,         # Se renombrará abajo
                 "Inicio_Mx": "| %H:%M:%S",
                 "Fin_Mx": "| %H:%M:%S",
                 "Talk_Formatted": True,
@@ -127,17 +158,14 @@ if check_password():
                           "<b>Dialed Number:</b> %{customdata[2]}<extra></extra>"
         )
 
-        # Ajustes de Ejes y Separadores de Hora (Grid)
+        # Ajustes estéticos
         fig.update_yaxes(
-            title="<b>Agent Performance Details</b>", 
-            title_font=dict(color="black", size=15),
+            title="Agent Performance Details", 
             autorange="reversed",
             tickfont=dict(color="black") # Forzar nombres en negro
         )
-        
         fig.update_xaxes(
-            title="<b>Shift Timeline (Hourly Separators)</b>", 
-            title_font=dict(color="black", size=15),
+            title="Shift Timeline (Hourly Grid)", 
             tickformat="%H:%M",
             dtick=3600000, # Separador cada hora exacta
             showgrid=True,
