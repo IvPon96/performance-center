@@ -1,4 +1,4 @@
-# v 2.11
+# v 2.12
 
 import streamlit as st
 import pandas as pd
@@ -211,6 +211,32 @@ if check_password():
             )
             
             st.plotly_chart(fig, use_container_width=True)
+            
+            # --- ESCOTILLA DE INSPECCIÓN ---
+            st.sidebar.markdown("---")
+            show_debug = st.sidebar.checkbox("🔍 Open the Black Box (Debug View)")
+
+            if show_debug:
+                st.markdown("---")
+                st.subheader("🕵️ Inside the Machine: Virtual Data Inspection")
+                st.write(f"Esta es la tabla 'fantasma' que Python generó en memoria para el día **{date_sel}**:")
+                
+                # Columnas para auditar la lógica
+                debug_cols = [
+                    'Full_Name', 'Inicio_Mx', 'Fin_Mx', 'Offset', 
+                    'In_Between_Idle', 'SOS_Idle', 'EOS_Idle', 'Idle_Secs',
+                    'is_first', 'is_last'
+                ]
+                
+                # Mostramos el DataFrame procesado
+                st.dataframe(df_dia[debug_cols].sort_values('Inicio_Mx'), use_container_width=True)
+                
+                st.info("""
+                **Guía de Auditoría:**
+                * **is_first / SOS_Idle**: Si es la primera llamada, aquí verás el tiempo desde la entrada (7/8 AM) hasta que marcó.
+                * **In_Between_Idle**: Es el 'gap' entre esta llamada y la anterior.
+                * **is_last / EOS_Idle**: Si es la última, verás el tiempo que sobró hasta el fin de turno (4/5 PM).
+                """)
         else:
             st.warning(f"No records found for {date_sel}.")
     else:
