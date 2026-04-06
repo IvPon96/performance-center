@@ -1,124 +1,89 @@
-# v 1.3 - The "form" update
+# v 1.4 - The "time" update
+
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go
 from data_engine import load_and_process, format_seconds
 
-# 1. Configuración de página
 st.set_page_config(page_title="Agent Audit Deep-Dive", layout="wide")
 
-# 2. Carga de datos (Motor compartido)
 data = load_and_process()
 
 if data is not None and not data.empty:
-    # --- BARRA LATERAL ---
-    st.sidebar.header("Filter Engine")
+    st.sidebar.header("Navigation Center")
+    
+    # 1. Filtro de Agente
     agent_list = sorted(data['Full_Name'].unique())
     agent_sel = st.sidebar.selectbox("Select Agent", agent_list)
-    
-    agent_data = data[data['Full_Name'] == agent_sel]
-    date_sel = st.sidebar.date_input("Audit Date", agent_data['Date_Only'].max())
-    
-    # --- PROCESAMIENTO DE VISTA INDIVIDUAL ---
-    df_audit = agent_data[agent_data['Date_Only'] == date_sel].copy()
+    df_agent = data[data['Full_Name'] == agent_sel].copy()
 
-    if not df_audit.empty:
-        st.title(f"👤 Performance Audit: {agent_sel}")
-        st.markdown(f"**Date:** {date_sel} | **Shift:** Outbound Operations")
+    # 2. Selector de Nivel de Vista (LA MAGIA)
+    view_level = st.sidebar.radio("View Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
+
+    # 3. Filtros Dinámicos según la resolución
+    if view_level == "Daily":
+        date_sel = st.sidebar.date_input("Select Day", df_agent['Date_Only'].max())
+        df_final = df_agent[df_agent['Date_Only'] == date_sel].copy()
+    
+    elif view_level == "Weekly":
+        weeks = sorted(df_agent['Week_Label'].unique(), reverse=True)
+        week_sel = st.sidebar.selectbox("Select ISO Week", weeks)
+        df_final = df_agent[df_agent['Week_Label'] == week_sel].copy()
+        
+    elif view_level == "Monthly":
+        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+        avail_months = [m for m in months if m in df_agent['Month'].unique()]
+        month_sel = st.sidebar.selectbox("Select Month", avail_months)
+        df_final = df_agent[df_agent['Month'] == month_sel].copy()
+        
+    else: # Quarterly
+        quarters = sorted(df_agent['Quarter'].unique())
+        q_sel = st.sidebar.selectbox("Select Quarter", quarters)
+        df_final = df_agent[df_agent['Quarter'] == q_sel].copy()
+
+    # --- RENDERIZADO DEL DASHBOARD ---
+    if not df_final.empty:
+        st.title(f"👤 Audit: {agent_sel} ({view_level} View)")
+        st.markdown(f"**Focus Period:** {view_level} Analysis")
         st.markdown("---")
 
-        # --- FILA 1: KPIs RESUMEN ---
-        # Calculamos totales del día para este agente
-        total_calls = len(df_audit)
-        sum_talk_secs = df_audit['Talk_Secs'].sum()
-        sum_idle_secs = df_audit['Idle_Secs'].iloc[0] if 'Idle_Secs' in df_audit.columns else 0
-        # Re-calculamos el Idle total para asegurar (SOS + Between + EOS)
-        # Nota: En el engine ya lo sumamos, así que tomamos el valor del registro
-        total_accounted = sum_talk_secs + df_audit['Idle_Secs'].sum() 
+        # KPIs (Igual que antes, pero df_final ahora es el periodo completo)
+        total_calls = len(df_final)
+        talk_secs = df_final['Talk_Secs'].sum()
+        idle_secs = df_final['Idle_Secs'].sum()
 
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("Total Calls", total_calls)
-        kpi1.caption("Dialed Outbound")
-        
-        kpi2.metric("Total Talk Time", format_seconds(sum_talk_secs))
-        kpi2.caption("Active Conversation")
-        
-        kpi3.metric("Total Idle Time", format_seconds(df_audit['Idle_Secs'].sum()))
-        kpi3.caption("Waiting / Gaps")
-        
-        kpi4.metric("Shift Coverage", format_seconds(total_accounted))
-        kpi4.caption("Time Accounted (Talk + Idle)")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Calls", total_calls)
+        c2.metric("Talk Time", format_seconds(talk_secs))
+        c3.metric("Idle Time", format_seconds(idle_secs))
+        c4.metric("Avg Talk/Call", f"{int(talk_secs/total_calls) if total_calls > 0 else 0}s")
 
         st.markdown("---")
 
-        # --- FILA 2: VISUAL INSIGHTS ---
-        col_chart, col_details = st.columns([1, 1])
+        # VISUALES DINÁMICOS
+        col_donut, col_trend = st.columns([1, 2])
 
-        with col_chart:
+        with col_donut:
             st.subheader("Time Distribution")
-            # Gráfico de Dona para ver el balance del día
-            labels = ['Talk Time', 'Idle Time']
-            values = [sum_talk_secs, df_audit['Idle_Secs'].sum()]
-            
-            fig_donut = px.pie(
-                names=labels, 
-                values=values, 
-                hole=0.6,
-                color_discrete_sequence=['#0066cc', '#E5E7E9'],
-                template="plotly_white"
-            )
-            fig_donut.update_layout(showlegend=True, margin=dict(t=0, b=0, l=0, r=0))
-            st.plotly_chart(fig_donut, use_container_width=True)
+            fig_pie = px.pie(names=['Talk', 'Idle'], values=[talk_secs, idle_secs], hole=0.5,
+                             color_discrete_sequence=['#0066cc', '#E5E7E9'])
+            st.plotly_chart(fig_pie, use_container_width=True)
 
-        with col_details:
-            st.subheader("Shift Edge Analysis")
-            # Mostramos el GAP de entrada y salida
-            sos_val = df_audit[df_audit['is_first']]['SOS_Idle'].sum()
-            eos_val = df_audit[df_audit['is_last']]['EOS_Idle'].sum()
-            
-            st.info(f"**Start of Shift Gap (SOS):** {format_seconds(sos_val)}")
-            st.caption("Time from 7/8 AM until first call.")
-            
-            st.warning(f"**End of Shift Gap (EOS):** {format_seconds(eos_val)}")
-            st.caption("Time from last call until 4/5 PM.")
-            
-            st.success(f"**Average Talk per Call:** {int(sum_talk_secs/total_calls) if total_calls > 0 else 0} seconds")
+        with col_trend:
+            if view_level == "Daily":
+                st.subheader("Intraday Activity Pulse")
+                fig = px.timeline(df_final, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
+                fig.update_layout(yaxis_visible=False, height=250)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.subheader("Daily Performance Trend")
+                # Agrupamos por día para ver cómo se comportó en la semana/mes/Q
+                trend_data = df_final.groupby('Date_Only').agg({'call_id':'count', 'Talk_Secs':'sum'}).reset_index()
+                fig = px.bar(trend_data, x='Date_Only', y='call_id', labels={'call_id':'Calls per Day'},
+                             color_discrete_sequence=['#0066cc'], title="Daily Call Volume")
+                st.plotly_chart(fig, use_container_width=True)
 
-        # --- FILA 3: PERSONAL PULSE MONITOR ---
-        st.markdown("---")
-        st.subheader("Activity Pulse (Personal Timeline)")
-        
-        # Re-formateamos para el gráfico personal
-        df_audit['Detail_Label'] = "Call to: " + df_audit['external_number'].astype(str)
-        
-        fig_pulse = px.timeline(
-            df_audit, 
-            x_start="Inicio_Mx", 
-            x_end="Fin_Mx", 
-            y="Full_Name", 
-            color_discrete_sequence=['#0066cc'],
-            hover_data={"Inicio_Mx": "|%H:%M:%S", "Fin_Mx": "|%H:%M:%S", "Talk_Formatted": True}
-        )
-        
-        fig_pulse.update_layout(
-            height=250, 
-            showlegend=False, 
-            xaxis_title="Time of Day",
-            yaxis_visible=False, # Ocultamos el nombre ya que es obvio
-            margin=dict(t=20, b=20, l=20, r=20)
-        )
-        
-        fig_pulse.update_xaxes(dtick=3600000, tickformat="%H:%M", showgrid=True)
-        st.plotly_chart(fig_pulse, use_container_width=True)
-
-        # --- FILA 4: DATA AUDIT TABLE ---
-        with st.expander("📄 View Raw Call Log"):
-            st.dataframe(
-                df_audit[['Inicio_Mx', 'Fin_Mx', 'Talk_Formatted', 'external_number', 'In_Between_Idle']].sort_values('Inicio_Mx'),
-                use_container_width=True
-            )
-
+        # TABLA DE AUDITORÍA
+        with st.expander("📄 View Period Log"):
+            st.dataframe(df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'Talk_Formatted', 'external_number', 'Idle_Secs']].sort_values('Inicio_Mx'))
     else:
-        st.warning(f"No records found for {agent_sel} on {date_sel}.")
-else:
-    st.error("Engine failed to load data.")
+        st.warning("No data found for this selection.")
