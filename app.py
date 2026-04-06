@@ -1,4 +1,4 @@
-# v 2.15 - Full Audit & Label Enhancement
+# v 2.16 - Historical Resilience Edition
 
 import streamlit as st
 import pandas as pd
@@ -35,7 +35,7 @@ def password_entered():
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
     GID_DB = '0' 
-    GID_DIM = '1947121871'
+    GID_DIM = '1947121871' 
     
     url_db = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DB}"
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
@@ -46,10 +46,28 @@ def load_and_process():
         df.columns = df.columns.str.strip()
         dim.columns = dim.columns.str.strip()
         
+        # --- PASO 1: UNIÓN POR EMAIL (Primaria) ---
         df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor']], 
                       left_on='email', right_on='Master_Email', how='left')
         
-        df['Full_Name'] = df['Full_Name'].fillna(df['email'])
+        # --- PASO 2: UNIÓN POR NOMBRE (Respaldo para bajas) ---
+        # Creamos una versión de DIM optimizada para buscar por nombre
+        dim_by_name = dim[['Dialpad_Name', 'Full_Name', 'production_floor']].rename(
+            columns={'Full_Name': 'FN_Name', 'production_floor': 'PF_Name'}
+        )
+        # Limpieza de nombres para que coincidan (minúsculas y sin espacios )
+        df['name_clean'] = df['name'].fillna('').str.strip().str.lower()
+        dim_by_name['Name_Match'] = dim_by_name['Dialpad_Name'].fillna('').str.strip().str.lower()
+        
+        df = df.merge(dim_by_name, left_on='name_clean', right_on='Name_Match', how='left')
+        
+        # --- PASO 3: PARCHEO DE DATOS ---
+        # Si Full_Name está vacío (porque falló el email), usamos el resultado del nombre
+        df['Full_Name'] = df['Full_Name'].fillna(df['FN_Name'])
+        df['production_floor'] = df['production_floor'].fillna(df['PF_Name'])
+        
+        # Fallback total: si nada funcionó, dejamos el nombre que venía en Dialpad
+        df['Full_Name'] = df['Full_Name'].fillna(df['name'])
         
     except Exception as e:
         return None
