@@ -83,6 +83,7 @@ def load_and_process():
     df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
     df['Idle_Secs'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
     df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
+    df['Talk_HHMMSS'] = df['Talk_secs'].apply(format_seconds)
     
     return df
 
@@ -142,7 +143,7 @@ if check_password():
                     "Full_Name": True, 
                     "Inicio_Mx": "| %H:%M:%S", 
                     "Fin_Mx": "| %H:%M:%S", 
-                    "Talk_Secs": True, 
+                    "Talk_HHMMSS": True, 
                     "external_number": True
                 }
             )
@@ -151,7 +152,7 @@ if check_password():
                 hovertemplate="<b>Agent:</b> %{customdata[0]}<br>" +
                               "<b>Started:</b> %{base|%H:%M:%S}<br>" +
                               "<b>Finished:</b> %{x|%H:%M:%S}<br>" +
-                              "<b>Talk:</b> %{customdata[1]:.1f}s<br>" +
+                              "<b>Talk:</b> %{customdata[1]}s<br>" +
                               "<b>Dialed:</b> %{customdata[2]}<extra></extra>"
             )
 
@@ -164,7 +165,7 @@ if check_password():
                 font=dict(color="black"),
                 xaxis_title="<b>Shift Timeline (24h Format)</b>",
                 yaxis_title="<b>Agents Performance Details</b>",
-                margin=dict(l=20, r=20, t=50, b=50) # Espacio para el título de abajo
+                margin=dict(l=50, r=20, t=50, b=80) # Espacio para el título de abajo
             )
 
             fig.update_xaxes(
