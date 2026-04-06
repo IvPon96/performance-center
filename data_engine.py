@@ -1,4 +1,4 @@
-# v 1.4 - The "time" update
+# v 1.5 - The "time" update
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -57,15 +57,24 @@ def load_and_process():
         df['Inicio_Mx'] = df['date_started'] + pd.to_timedelta(df['Offset'], unit='h')
         df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
         
-        # --- BLOQUE DE DIMENSIONES TEMPORALES (UNIFICADO) ---
+        # --- BLOQUE DE DIMENSIONES TEMPORALES (MEJORADO) ---
         df['Date_Only'] = df['Inicio_Mx'].dt.date
         df['Year'] = df['Inicio_Mx'].dt.year
         df['Month'] = df['Inicio_Mx'].dt.month_name()
         df['Quarter'] = 'Q' + df['Inicio_Mx'].dt.quarter.astype(str)
         
-        # ISO Week (W01, W02...)
+       # ISO Week con Rango de Fechas (W15 Apr 07 - Apr 13)
         df['Week_Number'] = df['Inicio_Mx'].dt.isocalendar().week
-        df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2)
+        
+        # Calculamos el lunes (Week_Start) y el domingo (Week_End)
+        df['Week_Start'] = df['Inicio_Mx'] - pd.to_timedelta(df['Inicio_Mx'].dt.dayofweek, unit='D')
+        df['Week_End'] = df['Week_Start'] + pd.to_timedelta(6, unit='D')
+        
+        # Etiqueta Final: Un solo cálculo para mayor eficiencia
+        df['Week_Label'] = (
+            'W' + df['Week_Number'].astype(str).str.zfill(2) + 
+            " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
+        )
         # ----------------------------------------------------
 
         # 5. Filtros Operativos
