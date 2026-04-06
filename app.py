@@ -1,19 +1,18 @@
-# v 4.4 
+# v 5.0
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import timedelta, datetime
 
-# --- 1. SETTINGS & THEME ---
+# --- 1. SETTINGS ---
 st.set_page_config(page_title="HITL Performance Center", layout="wide")
 
-# Helper to format seconds into HH:MM:SS
 def format_seconds(seconds):
     if pd.isna(seconds) or seconds <= 0: return "00:00:00"
     return str(timedelta(seconds=int(seconds)))
 
-# --- 2. SECURITY: SIMPLE LOGIN ---
+# --- 2. SECURITY ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.sidebar.text_input("Enter Password", type="password", on_change=password_entered, key="password")
@@ -25,20 +24,18 @@ def check_password():
     return True
 
 def password_entered():
-    # Password set to: TruckSmarter2026
     if st.session_state["password"] == "TruckSmarter2026":
         st.session_state["password_correct"] = True
         del st.session_state["password"]
     else:
         st.session_state["password_correct"] = False
 
-# --- 3. DATA ENGINE (ETL) ---
+# --- 3. DATA ENGINE ---
 @st.cache_data(ttl=600)
 def load_and_process():
-    # NEW SHEET IDENTIFIERS
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    GID_DB = '1947121871' # DB_Dialpad
-    GID_DIM = '0'        # <--- CHANGE THIS TO YOUR DIM_AGENTS GID
+    GID_DB = '0' #DB_Dialpad
+    GID_DIM = '1947121871' # DIM_Agents
     
     url_db = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DB}"
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
@@ -46,21 +43,33 @@ def load_and_process():
     try:
         df = pd.read_csv(url_db)
         dim = pd.read_csv(url_dim)
+        
+        # Limpieza de nombres de columnas
+        df.columns = df.columns.str.strip()
+        dim.columns = dim.columns.str.strip()
+        
+        # VERIFICACIÓN DE SEGURIDAD (Si esto falla, el error será claro)
+        required_dim = ['Master_Email', 'Full_Name', 'production_floor']
+        missing = [col for col in required_dim if col not in dim.columns]
+        if missing:
+            st.error(f"❌ Missing columns in DIM_Agents: {missing}")
+            st.info(f"Columns found: {dim.columns.tolist()}")
+            return None
+
+        # Unir Dialpad (columna 'email') con DIM (columna 'Master_Email')
+        df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor']], 
+                      left_on='email', right_on='Master_Email', how='left')
+        
     except Exception as e:
+        st.error(f"Error loading data: {e}")
         return None
 
-    df.columns = df.columns.str.strip()
-    dim.columns = dim.columns.str.strip()
-    
-    # Merge with Agent Info
-    df = df.merge(dim[['CALC_Master', 'Full_Name', 'production_floor']], on='CALC_Master', how='left')
-    
-    # Date Conversions
+    # Conversión de fechas
     df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
     df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
     df['production_floor'] = pd.to_datetime(df['production_floor'], errors='coerce')
 
-    # DST Logic (Fixed for March 8th)
+    # Lógica DST (México)
     def get_offset(dt):
         if pd.isna(dt): return 2
         year = dt.year
@@ -75,11 +84,11 @@ def load_and_process():
     df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
     df['Date_Only'] = df['Inicio_Mx'].dt.date
     
-    # Filter: Production Floor and Outbound only
+    # Filtros: Solo producción y solo Outbound
     df = df[df['Inicio_Mx'] >= df['production_floor']].copy()
     df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
 
-    # Metrics
+    # Cálculos de Inactividad
     df = df.sort_values(['Full_Name', 'Inicio_Mx'])
     df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
     df['Idle_Secs'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
@@ -87,86 +96,48 @@ def load_and_process():
     
     return df
 
-# --- 4. APP INTERFACE ---
+# --- 4. INTERFAZ ---
 if check_password():
     data = load_and_process()
     
-    if data is not None:
+    if data is not None and not data.empty:
         st.title("📊 HITL Performance Center")
-        st.markdown("---")
-
-        # Sidebar Filters
         st.sidebar.header("Control Panel")
-        available_dates = sorted(data['Date_Only'].unique(), reverse=True)
-        date_sel = st.sidebar.selectbox("Select Audit Date", available_dates)
-
+        
+        dates = sorted(data['Date_Only'].dropna().unique(), reverse=True)
+        date_sel = st.sidebar.selectbox("Select Audit Date", dates)
         df_dia = data[data['Date_Only'] == date_sel].copy()
 
         if not df_dia.empty:
-            # --- KPI CARDS ---
+            # KPIs
             total_calls = len(df_dia)
             most_active = df_dia['Full_Name'].value_counts().idxmax()
             avg_idle = df_dia.groupby('Full_Name')['Idle_Secs'].sum().mean()
 
             c1, c2, c3 = st.columns(3)
             c1.metric("Total Calls (Outbound)", total_calls)
-            c2.metric("Most Active Agent", most_active)
-            c3.metric("Avg. Idle Time per Agent", format_seconds(avg_idle))
+            c2.metric("Top Performer", most_active)
+            c3.metric("Avg. Idle Time", format_seconds(avg_idle))
 
-            # --- CHART PREPARATION ---
+            # Preparación de etiquetas
             stats = df_dia.groupby('Full_Name').agg(
                 Conn=('date_connected', 'count'),
                 Idle=('Idle_Secs', 'sum')
             ).reset_index()
-            
             df_dia = df_dia.merge(stats, on='Full_Name')
-            # High Contrast Labels for Y-Axis
+            
             df_dia['Chart_Label'] = (
-                "<b><span style='color:black; font-size:13px;'>" + df_dia['Full_Name'] + "</span></b>" + 
+                "<b>" + df_dia['Full_Name'].fillna('Unknown') + "</b>" + 
                 "<br><span style='color:#333333; font-size:11px;'>Calls: " + df_dia['Conn'].astype(str) + 
                 " | Idle: " + df_dia['Idle'].apply(format_seconds) + "</span>"
             )
 
-            # --- PULSÓMETRO CHART ---
-            st.subheader(f"Activity Pulse Monitor - {date_sel}")
+            # Gráfico
+            fig = px.timeline(df_dia, x_start="Inicio_Mx", x_end="Fin_Mx", y="Chart_Label", color="Full_Name", template="plotly_white")
+            fig.update_layout(height=600, showlegend=False, paper_bgcolor="#E5E7E9", plot_bgcolor="white")
+            fig.update_xaxes(dtick=3600000, tickformat="%H:%M", showgrid=True, gridcolor='rgba(0,0,0,0.15)')
+            fig.update_yaxes(autorange="reversed", title=None)
             
-            fig = px.timeline(
-                df_dia, x_start="Inicio_Mx", x_end="Fin_Mx", y="Chart_Label", color="Full_Name",
-                hover_data={
-                    "Chart_Label": False, "Full_Name": True, 
-                    "Inicio_Mx": "| %H:%M:%S", "Fin_Mx": "| %H:%M:%S", 
-                    "Talk_Secs": True, "external_number": True
-                },
-                template="plotly_white"
-            )
-
-            # Custom Hover (English)
-            fig.update_traces(
-                hovertemplate="<b>Agent:</b> %{customdata[0]}<br>" +
-                              "<b>Time Started:</b> %{base|%H:%M:%S}<br>" +
-                              "<b>Time Finished:</b> %{x|%H:%M:%S}<br>" +
-                              "<b>Talk Duration:</b> %{customdata[1]:.1f}s<br>" +
-                              "<b>Dialed Number:</b> %{customdata[2]}<extra></extra>"
-            )
-
-            # Styling: Hourly Grid & Sober Colors
-            fig.update_layout(
-                height=650, showlegend=False, 
-                paper_bgcolor="#E5E7E9", # Sober Grey
-                plot_bgcolor="white",    # White Plot Area
-                margin=dict(l=20, r=20, t=50, b=20),
-                font=dict(color="black")
-            )
-            fig.update_xaxes(
-                title="<b>Shift Timeline (Hourly Separators)</b>",
-                dtick=3600000, tickformat="%H:%M", 
-                showgrid=True, gridcolor='rgba(0,0,0,0.15)',
-                tickfont=dict(color="black", size=12)
-            )
-            fig.update_yaxes(title=None, autorange="reversed", tickfont=dict(color="black"))
-
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("No data found for this date.")
-    else:
-        st.error("Could not connect to the database. Check SHEET_ID and GIDs.")
+            st.warning("No records found for this date.")
