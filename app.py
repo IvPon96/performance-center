@@ -1,4 +1,4 @@
-# v 2.9
+# v 2.10
 
 import streamlit as st
 import pandas as pd
@@ -9,7 +9,8 @@ from datetime import timedelta, datetime
 st.set_page_config(page_title="HITL Performance Center", layout="wide")
 
 def format_seconds(seconds):
-    if pd.isna(seconds) or seconds <= 0: return "00:00:00"
+    if pd.isna(seconds) or seconds <= 0: return "0:00:00"
+    # Convertimos a HH:MM:SS quitando los microsegundos
     return str(timedelta(seconds=int(seconds)))
 
 # --- 2. SECURITY ---
@@ -35,7 +36,7 @@ def password_entered():
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
     GID_DB = '0' 
-    GID_DIM = '1947121871' # GID de DIM_Agents
+    GID_DIM = '1947121871' 
     
     url_db = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DB}"
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
@@ -46,11 +47,9 @@ def load_and_process():
         df.columns = df.columns.str.strip()
         dim.columns = dim.columns.str.strip()
         
-        # Unimos usando el email de Dialpad y Master_Email de DIM
         df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor']], 
                       left_on='email', right_on='Master_Email', how='left')
         
-        # Si por alguna razón no hay Full_Name, usamos el email como respaldo temporal
         df['Full_Name'] = df['Full_Name'].fillna(df['email'])
         
     except Exception as e:
@@ -75,15 +74,16 @@ def load_and_process():
     df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
     df['Date_Only'] = df['Inicio_Mx'].dt.date
     
-    # Filtros
     df = df[df['Inicio_Mx'] >= df['production_floor']].copy()
     df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
 
     df = df.sort_values(['Full_Name', 'Inicio_Mx'])
     df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
     df['Idle_Secs'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
+    
+    # Pre-formateamos la duración de la llamada para el visual
     df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
-    df['Talk_HHMMSS'] = df['Talk_secs'].apply(format_seconds)
+    df['Talk_Formatted'] = df['Talk_Secs'].apply(format_seconds)
     
     return df
 
@@ -95,10 +95,9 @@ if check_password():
         st.title("📊 HITL Performance Center")
         st.markdown("---")
 
-        # --- SELECTOR DE CALENDARIO ---
         st.sidebar.header("Control Panel")
         max_date = data['Date_Only'].max()
-        # Usamos date_input para el formato de calendario
+        # Selector tipo Calendario
         date_sel = st.sidebar.date_input("Select Audit Date", max_date)
 
         df_dia = data[data['Date_Only'] == date_sel].copy()
@@ -114,21 +113,19 @@ if check_password():
             c2.metric("Top Performer", most_active)
             c3.metric("Avg. Idle Time", format_seconds(avg_idle))
 
-            # --- ESTADÍSTICAS PARA ETIQUETAS ---
+            # Etiquetas en el eje Y (Negrita Forzada)
             stats = df_dia.groupby('Full_Name').agg(
                 Conn=('date_connected', 'count'),
                 Idle=('Idle_Secs', 'sum')
             ).reset_index()
             df_dia = df_dia.merge(stats, on='Full_Name')
             
-            # Construcción de la etiqueta con nombres en negrita (HTML)
             df_dia['Chart_Label'] = (
                 "<b>" + df_dia['Full_Name'] + "</b>" + 
                 "<br><span style='color:#333333; font-size:11px;'>Calls: " + df_dia['Conn'].astype(str) + 
                 " | Idle: " + df_dia['Idle'].apply(format_seconds) + "</span>"
             )
 
-            # --- GRÁFICO (PULSÓMETRO) ---
             st.subheader(f"Activity Pulse Monitor - {date_sel}")
             
             fig = px.timeline(
@@ -140,32 +137,33 @@ if check_password():
                 template="plotly_white",
                 hover_data={
                     "Chart_Label": False, 
-                    "Full_Name": True, 
-                    "Inicio_Mx": "| %H:%M:%S", 
-                    "Fin_Mx": "| %H:%M:%S", 
-                    "Talk_HHMMSS": True, 
-                    "external_number": True
+                    "Full_Name": True,        # customdata[0]
+                    "Talk_Formatted": True,   # customdata[1] <-- NUEVO FORMATO
+                    "external_number": True,  # customdata[2]
+                    "Inicio_Mx": False, 
+                    "Fin_Mx": False
                 }
             )
 
+            # Ajuste de Hover con formato de tiempo
             fig.update_traces(
                 hovertemplate="<b>Agent:</b> %{customdata[0]}<br>" +
-                              "<b>Started:</b> %{base|%H:%M:%S}<br>" +
-                              "<b>Finished:</b> %{x|%H:%M:%S}<br>" +
-                              "<b>Talk:</b> %{customdata[1]}s<br>" +
-                              "<b>Dialed:</b> %{customdata[2]}<extra></extra>"
+                              "<b>Time Started:</b> %{base|%H:%M:%S}<br>" +
+                              "<b>Time Finished:</b> %{x|%H:%M:%S}<br>" +
+                              "<b>Talk Duration:</b> %{customdata[1]}<br>" + # Ya viene formateado
+                              "<b>Dialed Number:</b> %{customdata[2]}<extra></extra>"
             )
 
-            # --- AJUSTES VISUALES ---
+            # Estética Sobria con Títulos y Negritas
             fig.update_layout(
                 height=650, 
                 showlegend=False, 
-                paper_bgcolor="#E5E7E9", # Fondo Gris Sobrio
+                paper_bgcolor="#E5E7E9", 
                 plot_bgcolor="white",
                 font=dict(color="black"),
                 xaxis_title="<b>Shift Timeline (24h Format)</b>",
                 yaxis_title="<b>Agents Performance Details</b>",
-                margin=dict(l=50, r=20, t=50, b=80) # Espacio para el título de abajo
+                margin=dict(l=20, r=20, t=50, b=80) 
             )
 
             fig.update_xaxes(
@@ -173,17 +171,18 @@ if check_password():
                 tickformat="%H:%M", 
                 showgrid=True, 
                 gridcolor='rgba(0,0,0,0.1)',
-                tickfont=dict(color="black", size=11, family="Arial Black") # Horas más visibles
+                tickfont=dict(color="black", size=12, family="Arial Black"),
+                side="bottom" # Asegura que las horas estén abajo
             )
 
             fig.update_yaxes(
                 autorange="reversed", 
                 tickfont=dict(color="black", size=12),
-                title_font=dict(size=14)
+                title_font=dict(size=14, family="Arial Black")
             )
             
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning(f"No records found for {date_sel}.")
     else:
-        st.error("No data found. Please check your Google Sheet connection.")
+        st.error("Connection error or empty dataset.")
