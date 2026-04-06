@@ -12,8 +12,8 @@ def format_seconds(seconds):
 def load_and_process():
     # Identificadores de tu Google Sheet
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    GID_DB = '1947121871' 
-    GID_DIM = '0'
+    GID_DB = '0' 
+    GID_DIM = '1947121871'
     
     url_db = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DB}"
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
