@@ -1,4 +1,4 @@
-# v 2.8
+# v 2.9
 
 import streamlit as st
 import pandas as pd
@@ -34,8 +34,8 @@ def password_entered():
 @st.cache_data(ttl=600)
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    GID_DB = '1947121871' 
-    GID_DIM = '0' # GID de DIM_Agents
+    GID_DB = '0' 
+    GID_DIM = '1947121871' # GID de DIM_Agents
     
     url_db = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DB}"
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
