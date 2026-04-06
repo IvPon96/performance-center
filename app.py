@@ -1,4 +1,4 @@
-# v 2.10
+# v 2.11
 
 import streamlit as st
 import pandas as pd
@@ -34,28 +34,22 @@ def password_entered():
 # --- 3. DATA ENGINE ---
 @st.cache_data(ttl=600)
 def load_and_process():
+    # ... (Mantenemos la carga de datos igual hasta el cálculo de Offset) ...
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
     GID_DB = '0' 
-    GID_DIM = '1947121871' 
+    GID_DIM = '1947121871'
     
     url_db = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DB}"
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
     
-    try:
-        df = pd.read_csv(url_db)
-        dim = pd.read_csv(url_dim)
-        df.columns = df.columns.str.strip()
-        dim.columns = dim.columns.str.strip()
-        
-        df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor']], 
-                      left_on='email', right_on='Master_Email', how='left')
-        
-        df['Full_Name'] = df['Full_Name'].fillna(df['email'])
-        
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return None
-
+    df = pd.read_csv(url_db)
+    dim = pd.read_csv(url_dim)
+    df.columns = df.columns.str.strip()
+    dim.columns = dim.columns.str.strip()
+    
+    df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor']], 
+                  left_on='email', right_on='Master_Email', how='left')
+    
     df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
     df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
     df['production_floor'] = pd.to_datetime(df['production_floor'], errors='coerce')
@@ -77,11 +71,46 @@ def load_and_process():
     df = df[df['Inicio_Mx'] >= df['production_floor']].copy()
     df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
 
+    # --- NUEVA LÓGICA DE SOS / EOS ---
     df = df.sort_values(['Full_Name', 'Inicio_Mx'])
-    df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
-    df['Idle_Secs'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
     
-    # Pre-formateamos la duración de la llamada para el visual
+    # 1. Definir Entrada y Salida Teórica según DST
+    # Si Offset es 1 (DST) -> 7am a 4pm. Si es 2 (Standard) -> 8am a 5pm.
+    df['Shift_Start_Hour'] = df['Offset'].map({1: 7, 2: 8})
+    df['Shift_End_Hour'] = df['Offset'].map({1: 16, 2: 17})
+
+    # 2. Calcular Gaps entre llamadas (In-between)
+    df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
+    df['In_Between_Idle'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
+
+    # 3. Calcular SOS (Diferencia en la PRIMERA llamada del día)
+    # Identificamos la primera llamada
+    df['is_first'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='first')
+    
+    def calculate_sos(row):
+        if row['is_first']:
+            theoretical_start = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Shift_Start_Hour'])
+            gap = (row['Inicio_Mx'] - theoretical_start).total_seconds()
+            return max(0, gap) # Si empezó antes de su hora, es 0 idle
+        return 0
+
+    df['SOS_Idle'] = df.apply(calculate_sos, axis=1)
+
+    # 4. Calcular EOS (Diferencia en la ÚLTIMA llamada del día)
+    df['is_last'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='last')
+
+    def calculate_eos(row):
+        if row['is_last']:
+            theoretical_end = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Shift_End_Hour'])
+            gap = (theoretical_end - row['Fin_Mx']).total_seconds()
+            return max(0, gap) # Si terminó después de su hora, es 0 idle
+        return 0
+
+    df['EOS_Idle'] = df.apply(calculate_eos, axis=1)
+
+    # 5. Idle Total = SOS + In-Between + EOS
+    df['Idle_Secs'] = df['In_Between_Idle'] + df['SOS_Idle'] + df['EOS_Idle']
+    
     df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
     df['Talk_Formatted'] = df['Talk_Secs'].apply(format_seconds)
     
