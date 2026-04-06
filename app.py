@@ -1,19 +1,10 @@
-# v 2.18 - Minor bux fixing
+# v 2.19 - Black screen
 import streamlit as st
 import plotly.express as px
 from data_engine import load_and_process, format_seconds
 
+# Configuración inicial (DEBE SER LA PRIMERA LÍNEA DE STREAMLIT)
 st.set_page_config(page_title="HITL Performance Center", layout="wide")
-
-def check_password():
-    if "password_correct" not in st.session_state:
-        st.sidebar.text_input("Password", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.sidebar.text_input("Password", type="password", on_change=password_entered, key="password")
-        st.sidebar.error("❌ Incorrect")
-        return False
-    return True
 
 def password_entered():
     if st.session_state["password"] == "TruckSmarter2026":
@@ -22,17 +13,32 @@ def password_entered():
     else:
         st.session_state["password_correct"] = False
 
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.sidebar.text_input("Please enter Password", type="password", on_change=password_entered, key="password")
+        st.info("🔒 Please log in via the sidebar to access the dashboard.")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.sidebar.text_input("Please enter Password", type="password", on_change=password_entered, key="password")
+        st.sidebar.error("❌ Incorrect Password")
+        return False
+    return True
+
+# Lógica principal
 if check_password():
     data = load_and_process()
     
     if data is not None and not data.empty:
         st.title("📊 HITL Performance Center - Fleet Overview")
+        st.markdown("---")
+
         st.sidebar.header("Control Panel")
         max_date = data['Date_Only'].max()
         date_sel = st.sidebar.date_input("Audit Date", max_date)
         df_dia = data[data['Date_Only'] == date_sel].copy()
 
         if not df_dia.empty:
+            # KPIs
             total_calls = len(df_dia)
             total_idle_secs = df_dia.groupby('Full_Name')['Idle_Secs'].sum().mean()
             total_talk_secs = df_dia.groupby('Full_Name')['Talk_Secs'].sum().mean()
@@ -43,6 +49,7 @@ if check_password():
             c3.metric("Avg. Talk Time", format_seconds(total_talk_secs))
             c4.metric("Total Accounted", format_seconds(total_idle_secs + total_talk_secs))
 
+            # Gráfico
             stats = df_dia.groupby('Full_Name').agg(
                 Conn=('call_id', 'count'),
                 Idle_Sum=('Idle_Secs', 'sum'),
@@ -57,6 +64,7 @@ if check_password():
                 "<br><span style='color:#0066cc; font-size:10px;'>Talk: " + df_dia['Talk_Sum'].apply(format_seconds) + "</span>"
             )
 
+            st.subheader(f"Fleet Pulse Monitor - {date_sel}")
             fig = px.timeline(df_dia, x_start="Inicio_Mx", x_end="Fin_Mx", y="Chart_Label", color="Full_Name", template="plotly_white",
                               hover_data={"Chart_Label": False, "Full_Name": True, "Talk_Formatted": True, "external_number": True})
             fig.update_layout(height=650, showlegend=False, paper_bgcolor="#E5E7E9", plot_bgcolor="white")
@@ -64,7 +72,7 @@ if check_password():
             fig.update_yaxes(autorange="reversed")
             st.plotly_chart(fig, use_container_width=True)
             
-            # --- BLACK BOX LOGIC ---
+            # Debug
             st.sidebar.markdown("---")
             show_debug = st.sidebar.checkbox("🔍 Open the Black Box")
             if show_debug:
@@ -74,4 +82,6 @@ if check_password():
                 recon['Accounted'] = (recon['Talk_Sum'] + recon['Idle_Sum']).apply(format_seconds)
                 st.table(recon[['Full_Name', 'Accounted']])
         else:
-            st.warning("No data.")
+            st.warning("No data found for this date.")
+    else:
+        st.error("Could not load data. Check logs in 'Manage App'.")
