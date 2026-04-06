@@ -1,4 +1,4 @@
-# v 2.14 - Fixed Order & Clean Debug
+# v 2.15 - Full Audit & Label Enhancement
 
 import streamlit as st
 import pandas as pd
@@ -34,20 +34,26 @@ def password_entered():
 @st.cache_data(ttl=600)
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    GID_DB = '0' 
-    GID_DIM = '1947121871'
+    GID_DB = '1947121871' 
+    GID_DIM = '0'
     
     url_db = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DB}"
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
     
-    df = pd.read_csv(url_db)
-    dim = pd.read_csv(url_dim)
-    df.columns = df.columns.str.strip()
-    dim.columns = dim.columns.str.strip()
-    
-    df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor']], 
-                  left_on='email', right_on='Master_Email', how='left')
-    
+    try:
+        df = pd.read_csv(url_db)
+        dim = pd.read_csv(url_dim)
+        df.columns = df.columns.str.strip()
+        dim.columns = dim.columns.str.strip()
+        
+        df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor']], 
+                      left_on='email', right_on='Master_Email', how='left')
+        
+        df['Full_Name'] = df['Full_Name'].fillna(df['email'])
+        
+    except Exception as e:
+        return None
+
     df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
     df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
     df['production_floor'] = pd.to_datetime(df['production_floor'], errors='coerce')
@@ -72,19 +78,19 @@ def load_and_process():
     # --- LÓGICA DE TIEMPOS ---
     df = df.sort_values(['Full_Name', 'Inicio_Mx'])
     
-    # 1. Talk Time (MOVIDO ARRIBA para que esté disponible para los cálculos)
+    # 1. Talk Time
     df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
     df['Talk_Formatted'] = df['Talk_Secs'].apply(format_seconds)
 
-    # 2. Definir Horarios según DST
+    # 2. Horarios
     df['Shift_Start_Hour'] = df['Offset'].map({1: 7, 2: 8})
     df['Shift_End_Hour'] = df['Offset'].map({1: 16, 2: 17})
 
-    # 3. Gaps entre llamadas
+    # 3. Gaps
     df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
     df['In_Between_Idle'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
 
-    # 4. SOS (Start of Shift)
+    # 4. SOS
     df['is_first'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='first')
     
     def calculate_sos(row):
@@ -96,7 +102,7 @@ def load_and_process():
 
     df['SOS_Idle'] = df.apply(calculate_sos, axis=1)
 
-    # 5. EOS (End of Shift)
+    # 5. EOS
     df['is_last'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='last')
 
     def calculate_eos(row):
@@ -108,9 +114,8 @@ def load_and_process():
 
     df['EOS_Idle'] = df.apply(calculate_eos, axis=1)
 
-    # 6. Consolidación Final
+    # 6. Totales
     df['Idle_Secs'] = df['In_Between_Idle'] + df['SOS_Idle'] + df['EOS_Idle']
-    df['Total_Talk_Secs'] = df.groupby(['Full_Name', 'Date_Only'])['Talk_Secs'].transform('sum')
     
     return df
 
@@ -129,11 +134,8 @@ if check_password():
         df_dia = data[data['Date_Only'] == date_sel].copy()
 
         if not df_dia.empty:
-            # --- KPIs ---
+            # --- KPIs SUPERIORES ---
             total_calls = len(df_dia)
-            most_active = df_dia['Full_Name'].value_counts().idxmax()
-            
-            # Promedios por agente
             total_idle_secs = df_dia.groupby('Full_Name')['Idle_Secs'].sum().mean()
             total_talk_secs = df_dia.groupby('Full_Name')['Talk_Secs'].sum().mean()
             
@@ -143,17 +145,21 @@ if check_password():
             c3.metric("Avg. Talk Time", format_seconds(total_talk_secs))
             c4.metric("Total Accounted", format_seconds(total_idle_secs + total_talk_secs))
 
-            # Visualización del gráfico
+            # --- AGREGACIÓN PARA ETIQUETAS Y GRÁFICO ---
             stats = df_dia.groupby('Full_Name').agg(
-                Conn=('date_connected', 'count'),
-                Idle=('Idle_Secs', 'sum')
+                Conn=('call_id', 'count'),
+                Idle_Sum=('Idle_Secs', 'sum'),
+                Talk_Sum=('Talk_Secs', 'sum')
             ).reset_index()
+            
             df_dia = df_dia.merge(stats, on='Full_Name')
             
+            # Nueva etiqueta con Talk Time debajo
             df_dia['Chart_Label'] = (
                 "<b>" + df_dia['Full_Name'] + "</b>" + 
-                "<br><span style='color:#333333; font-size:11px;'>Calls: " + df_dia['Conn'].astype(str) + 
-                " | Idle: " + df_dia['Idle'].apply(format_seconds) + "</span>"
+                "<br><span style='color:#333333; font-size:10px;'>Calls: " + df_dia['Conn'].astype(str) + "</span>" +
+                "<br><span style='color:#333333; font-size:10px;'>Idle: " + df_dia['Idle_Sum'].apply(format_seconds) + "</span>" +
+                "<br><span style='color:#0066cc; font-size:10px;'>Talk: " + df_dia['Talk_Sum'].apply(format_seconds) + "</span>"
             )
 
             st.subheader(f"Activity Pulse Monitor - {date_sel}")
@@ -176,15 +182,37 @@ if check_password():
             )
 
             fig.update_xaxes(dtick=3600000, tickformat="%H:%M", showgrid=True, gridcolor='rgba(0,0,0,0.1)', tickfont=dict(color="black", size=12, family="Arial Black"))
-            fig.update_yaxes(autorange="reversed", tickfont=dict(color="black", size=12))
+            fig.update_yaxes(autorange="reversed", tickfont=dict(color="black", size=11))
             
             st.plotly_chart(fig, use_container_width=True)
             
-            # --- ESCOTILLA DE INSPECCIÓN ---
+            # --- ESCOTILLA DE INSPECCIÓN (CORREGIDA) ---
             st.sidebar.markdown("---")
             show_debug = st.sidebar.checkbox("🔍 Open the Black Box (Debug View)")
 
             if show_debug:
+                st.markdown("---")
                 st.subheader("🕵️ Inside the Machine: Virtual Data Inspection")
                 
-                # Res
+                # Tabla 1: Conciliación
+                st.write("### ⚖️ Shift Reconciliation (Verification)")
+                reconciliation = stats.copy()
+                reconciliation['Total_Shift'] = reconciliation['Talk_Sum'] + reconciliation['Idle_Sum']
+                reconciliation['Talk_Time'] = reconciliation['Talk_Sum'].apply(format_seconds)
+                reconciliation['Idle_Time'] = reconciliation['Idle_Sum'].apply(format_seconds)
+                reconciliation['Accounted'] = reconciliation['Total_Shift'].apply(format_seconds)
+                
+                st.table(reconciliation[['Full_Name', 'Talk_Time', 'Idle_Time', 'Accounted']])
+                
+                # Tabla 2: Auditoría Fila por Fila
+                st.write("### 📋 Row-by-Row Internal Calculation")
+                debug_cols = [
+                    'Full_Name', 'Inicio_Mx', 'Fin_Mx', 
+                    'Talk_Secs', 'In_Between_Idle', 'SOS_Idle', 'EOS_Idle',
+                    'is_first', 'is_last'
+                ]
+                st.dataframe(df_dia[debug_cols].sort_values(['Full_Name', 'Inicio_Mx']), use_container_width=True)
+        else:
+            st.warning(f"No records found for {date_sel}.")
+    else:
+        st.error("Connection error or empty dataset.")
