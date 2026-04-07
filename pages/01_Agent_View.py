@@ -1,4 +1,4 @@
-# v2.4 - Social Media Auditor view
+# v2.4 - Social Media Auditor View
 import streamlit as st
 import plotly.express as px
 import pandas as pd
@@ -81,4 +81,54 @@ if data is not None and not data.empty:
                     for day in days_in_period[display_limit:]:
                         day_data = df_final[df_final['Date_Only'] == day]
                         st.caption(f"📅 **{day.strftime('%A, %b %d')}**")
-                        fig_day = px.timeline(day_data, x_start="Inicio_Mx", x_end="Fin_Mx", y="
+                        fig_day = px.timeline(day_data, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
+                        fig_day.update_layout(height=80, margin=dict(t=0, b=0), yaxis_visible=False)
+                        st.plotly_chart(fig_day, use_container_width=True, config={'displayModeBar': False})
+
+        st.markdown("---")
+
+        # --- SECCIÓN 2: FRECUENCIA / TREND ---
+        if view_level == "Daily":
+            st.subheader("📊 Frequency (15m Intervals)")
+            freq_data = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
+            fig_bar = px.bar(freq_data, x='15m_Interval', y='Calls', color_discrete_sequence=['#00cc96'])
+        else:
+            st.subheader("📈 Daily Volume Trend")
+            trend_data = df_final.groupby('Date_Only').size().reset_index(name='Calls')
+            fig_bar = px.bar(trend_data, x='Date_Only', y='Calls', color_discrete_sequence=['#0066cc'])
+        
+        fig_bar.update_layout(height=300)
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+        st.markdown("---")
+
+        # --- LOG DETALLADO PARA AUDITORÍA ---
+        st.subheader("📋 Detailed Operational Log (Audit Mode)")
+        df_log = df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'num_str', 'Talk_Secs', 'In_Between_Idle', 'Gap_Category', 'is_repeat']].copy()
+        df_log['Date'] = df_log['Date_Only'].astype(str)
+        df_log['Start'] = df_log['Inicio_Mx'].dt.strftime('%H:%M:%S')
+        df_log['Finished'] = df_log['Fin_Mx'].dt.strftime('%H:%M:%S')
+        df_log['Talk'] = df_log['Talk_Secs'].apply(format_seconds)
+        df_log['Idle After'] = df_log['In_Between_Idle'].apply(format_seconds)
+        
+        final_table = df_log[['Date', 'Start', 'Finished', 'num_str', 'Talk', 'Idle After', 'Gap_Category', 'is_repeat']]
+        final_table.columns = ['Date', 'Start', 'Finished', 'Number', 'Talk', 'Idle After', 'Category', 'Repeated']
+
+        def style_audit_final(row):
+            styles = [''] * len(row)
+            cols = list(final_table.columns)
+            if row['Repeated']: styles[cols.index('Number')] = 'color: #8b0000; font-weight: bold;'
+            cat = row['Category']
+            if "Standard Doc" in cat: styles[cols.index('Category')] = 'color: #28a745;'
+            elif "Micro-Gap" in cat: styles[cols.index('Category')] = 'color: #ffc107;'
+            elif "Extended Idle" in cat: styles[cols.index('Category')] = 'color: #fd7e14;'
+            elif "Operational Gap" in cat: styles[cols.index('Category')] = 'color: #dc3545; font-weight: bold;'
+            elif "🥗 Likely Lunch" in cat: styles[cols.index('Category')] = 'color: #6f42c1; font-weight: bold;'
+            return styles
+
+        st.dataframe(final_table.style.apply(style_audit_final, axis=1), use_container_width=True, hide_index=True)
+
+    else:
+        st.warning("No data found for this period.")
+else:
+    st.error("Engine failed to load data.")
