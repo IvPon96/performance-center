@@ -1,4 +1,4 @@
-# v 1.6 - The Controlio update
+# v 1.6.1 - The "Clean & Logic" update
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -9,11 +9,11 @@ def format_seconds(seconds):
     return str(timedelta(seconds=int(seconds)))
 
 def get_attendance_status(login_time, start_shift_hour):
-    """Lógica de tu fórmula de Excel para puntualidad"""
+    """Lógica de puntualidad basada en la fórmula de Excel"""
     if pd.isna(login_time): return "NO LOG"
     
     # Creamos el objeto tiempo para el inicio de turno (7 u 8 AM)
-    shift_start = login_time.replace(hour=start_shift_hour, minute=0, second=0, microsecond=0)
+    shift_start = login_time.replace(hour=int(start_shift_hour), minute=0, second=0, microsecond=0)
     
     if login_time <= (shift_start + timedelta(seconds=59)):
         return "ON TIME"
@@ -54,17 +54,17 @@ def load_and_process():
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
     
     try:
-        # Carga básica
+        # Carga básica de Dialpad y DIM
         df = pd.read_csv(url_db)
         dim = pd.read_csv(url_dim)
         df.columns = df.columns.str.strip()
         dim.columns = dim.columns.str.strip()
         
-        # Join Dialpad + DIM
+        # Join Dialpad + DIM para obtener Controlio_ID
         df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor', 'Controlio_ID']], 
                       left_on='email', right_on='Master_Email', how='left')
         
-        # Fallback de nombre
+        # Fallback de nombre por si no hay email
         dim_by_name = dim[['Dialpad_Name', 'Full_Name', 'production_floor']].rename(
             columns={'Full_Name': 'FN_Name', 'production_floor': 'PF_Name'}
         )
@@ -75,7 +75,7 @@ def load_and_process():
         df['Full_Name'] = df['Full_Name'].fillna(df['FN_Name']).fillna(df['name'])
         df['production_floor'] = pd.to_datetime(df['production_floor'].fillna(df['PF_Name']), errors='coerce')
         
-        # Lógica de Tiempos
+        # Lógica de Tiempos México
         df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
         df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
 
@@ -93,36 +93,22 @@ def load_and_process():
         df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
         df['Date_Only'] = df['Inicio_Mx'].dt.date
         
-        # --- INTEGRACIÓN CON CONTROLIO (REFORZADA) ---
-        # Inicializamos las columnas como vacías para evitar el KeyError
+        # --- INTEGRACIÓN CON CONTROLIO ---
+        # Inicializamos columnas de seguridad
         df['login_dt'] = pd.NaT
         df['logout_dt'] = pd.NaT
-        df['Attendance_Status'] = "NO LOG"
-        df['Ready_Gap'] = "0:00:00"
-        df['Ready_Gap_Secs'] = 0
 
         df_con = load_controlio()
-        
         if df_con is not None and not df_con.empty:
-            # Intentamos la unión
-            df = df.drop(columns=['login_dt', 'logout_dt'], errors='ignore') # Limpiamos las temporales
+            df = df.drop(columns=['login_dt', 'logout_dt'], errors='ignore')
             df = df.merge(
                 df_con[['user_name', 'date_dt', 'login_dt', 'logout_dt']],
                 left_on=['Controlio_ID', 'Date_Only'],
                 right_on=['user_name', 'date_dt'],
                 how='left'
             )
-            
-            # Recalculamos los status solo si hubo match
-            df['Attendance_Status'] = df.apply(
-                lambda x: get_attendance_status(x['login_dt'], x['Shift_Start_Hour']) if x['is_first'] else None, axis=1
-            )
-            
-            # Cálculo del Ready Gap: $Ready\_Gap = Inicio\_Mx - login\_dt$
-            df['Ready_Gap_Secs'] = (df['Inicio_Mx'] - df['login_dt']).dt.total_seconds().fillna(0)
-            df['Ready_Gap'] = df['Ready_Gap_Secs'].apply(lambda x: format_seconds(x) if x > 0 else "0:00:00")
 
-        # Dimensiones Temporales
+        # Dimensiones Temporales ISO
         df['Year'] = df['Inicio_Mx'].dt.year
         df['Month'] = df['Inicio_Mx'].dt.month_name()
         df['Quarter'] = 'Q' + df['Inicio_Mx'].dt.quarter.astype(str)
@@ -131,39 +117,44 @@ def load_and_process():
         df['Week_End'] = df['Week_Start'] + pd.to_timedelta(6, unit='D')
         df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2) + " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
 
-        # Filtros y Cálculos de Productividad
+        # Filtros de Operación
         df = df[df['Inicio_Mx'] >= df['production_floor']].copy()
         df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
         df = df.sort_values(['Full_Name', 'Inicio_Mx'])
         
+        # Cálculos de Productividad
         df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
         df['Talk_Formatted'] = df['Talk_Secs'].apply(format_seconds)
         df['Shift_Start_Hour'] = df['Offset'].map({1: 7, 2: 8})
         
-        # GAP Analysis (SOS/EOS/Idle)
+        # Gaps de Inactividad
         df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
         df['In_Between_Idle'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
         df['is_first'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='first')
         df['is_last'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='last')
         
-        # Aplicamos la lógica de asistencia a la primera llamada de cada día
+        # --- CÁLCULOS FINALES (Attendance & Ready Gap) ---
+        # Se calcula solo una vez al final para mayor eficiencia
         df['Attendance_Status'] = df.apply(
             lambda x: get_attendance_status(x['login_dt'], x['Shift_Start_Hour']) if x['is_first'] else None, axis=1
         )
         
-        # Ready Gap: Diferencia entre login PC y primera llamada
         df['Ready_Gap_Secs'] = (df['Inicio_Mx'] - df['login_dt']).dt.total_seconds().fillna(0)
         df['Ready_Gap'] = df['Ready_Gap_Secs'].apply(lambda x: format_seconds(x) if x > 0 else "0:00:00")
 
-        # Cálculos de Gaps
+        # SOS y EOS con lógica corregida (usando .get() en lugar de .map())
         def calc_sos(row):
             if row['is_first']:
                 t_start = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Shift_Start_Hour'])
                 return max(0, (row['Inicio_Mx'] - t_start).total_seconds())
             return 0
+
         def calc_eos(row):
             if row['is_last']:
-                t_end = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Offset'].map({1: 16, 2: 17}))
+                # Corregido: Usamos el diccionario directamente con el valor de la celda
+                shift_end_map = {1: 16, 2: 17}
+                hour_end = shift_end_map.get(row['Offset'], 17)
+                t_end = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=hour_end)
                 return max(0, (t_end - row['Fin_Mx']).total_seconds())
             return 0
 
@@ -174,5 +165,5 @@ def load_and_process():
         return df
 
     except Exception as e:
-        st.error(f"Error en el motor de datos: {e}")
+        st.error(f"Error crítico en el motor: {e}")
         return None
