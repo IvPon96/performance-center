@@ -1,16 +1,50 @@
-# v 1.5 - The "time" update
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
 
-# Función para formatear segundos a HH:MM:SS
+# --- 1. HELPERS Y CÁLCULOS ---
 def format_seconds(seconds):
     if pd.isna(seconds) or seconds <= 0: return "0:00:00"
     return str(timedelta(seconds=int(seconds)))
 
+def get_attendance_status(login_time, start_shift_hour):
+    """Lógica de tu fórmula de Excel para puntualidad"""
+    if pd.isna(login_time): return "NO LOG"
+    
+    # Creamos el objeto tiempo para el inicio de turno (7 u 8 AM)
+    shift_start = login_time.replace(hour=start_shift_hour, minute=0, second=0, microsecond=0)
+    
+    if login_time <= (shift_start + timedelta(seconds=59)):
+        return "ON TIME"
+    elif login_time <= (shift_start + timedelta(minutes=10)):
+        return "TARDY"
+    else:
+        return "LATE"
+
+# --- 2. MOTOR DE CARGA INDEPENDIENTE (CONTROLIO) ---
+@st.cache_data(ttl=600)
+def load_controlio():
+    SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
+    GID_CONTROLIO = '1577581202'
+    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_CONTROLIO}"
+    
+    try:
+        df_con = pd.read_csv(url)
+        df_con.columns = df_con.columns.str.strip().str.lower()
+        
+        # Convertir fechas (02.01.2026) y horas
+        df_con['date_dt'] = pd.to_datetime(df_con['day'], format='%d.%m.%Y').dt.date
+        df_con['login_dt'] = pd.to_datetime(df_con['day'] + ' ' + df_con['start_time'], dayfirst=True)
+        df_con['logout_dt'] = pd.to_datetime(df_con['day'] + ' ' + df_con['end_time'], dayfirst=True)
+        
+        return df_con
+    except Exception as e:
+        st.error(f"Error en Controlio: {e}")
+        return None
+
+# --- 3. MOTOR PRINCIPAL (DIALPAD + MERGE CONTROLIO) ---
 @st.cache_data(ttl=600)
 def load_and_process():
-    # 1. Identificadores de Google Sheet
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
     GID_DB = '0'  
     GID_DIM = '1947121871'
@@ -19,16 +53,17 @@ def load_and_process():
     url_dim = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_DIM}"
     
     try:
-        # 2. Carga y Limpieza Básica
+        # Carga básica
         df = pd.read_csv(url_db)
         dim = pd.read_csv(url_dim)
         df.columns = df.columns.str.strip()
         dim.columns = dim.columns.str.strip()
         
-        # 3. Join Engine (Email + Name Fallback)
-        df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor']], 
+        # Join Dialpad + DIM
+        df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor', 'Controlio_ID']], 
                       left_on='email', right_on='Master_Email', how='left')
         
+        # Fallback de nombre
         dim_by_name = dim[['Dialpad_Name', 'Full_Name', 'production_floor']].rename(
             columns={'Full_Name': 'FN_Name', 'production_floor': 'PF_Name'}
         )
@@ -36,11 +71,10 @@ def load_and_process():
         dim_by_name['Name_Match'] = dim_by_name['Dialpad_Name'].fillna('').str.strip().str.lower()
         df = df.merge(dim_by_name, left_on='name_clean', right_on='Name_Match', how='left')
         
-        # Consolidación final de nombres y fechas de inicio
         df['Full_Name'] = df['Full_Name'].fillna(df['FN_Name']).fillna(df['name'])
         df['production_floor'] = pd.to_datetime(df['production_floor'].fillna(df['PF_Name']), errors='coerce')
         
-        # 4. Lógica de Tiempos y Horario de Verano (DST)
+        # Lógica de Tiempos
         df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
         df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
 
@@ -56,56 +90,62 @@ def load_and_process():
         df['Offset'] = df['date_started'].apply(get_offset)
         df['Inicio_Mx'] = df['date_started'] + pd.to_timedelta(df['Offset'], unit='h')
         df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
-        
-        # --- BLOQUE DE DIMENSIONES TEMPORALES (MEJORADO) ---
         df['Date_Only'] = df['Inicio_Mx'].dt.date
+        
+        # --- INTEGRACIÓN CON CONTROLIO ---
+        df_con = load_controlio()
+        if df_con is not None:
+            # Traemos la data de Controlio al DataFrame de Dialpad
+            # Unimos por el ID de computadora y la fecha
+            df = df.merge(
+                df_con[['user_name', 'date_dt', 'login_dt', 'logout_dt']],
+                left_on=['Controlio_ID', 'Date_Only'],
+                right_on=['user_name', 'date_dt'],
+                how='left'
+            )
+
+        # Dimensiones Temporales
         df['Year'] = df['Inicio_Mx'].dt.year
         df['Month'] = df['Inicio_Mx'].dt.month_name()
         df['Quarter'] = 'Q' + df['Inicio_Mx'].dt.quarter.astype(str)
-        
-       # ISO Week con Rango de Fechas (W15 Apr 07 - Apr 13)
         df['Week_Number'] = df['Inicio_Mx'].dt.isocalendar().week
-        
-        # Calculamos el lunes (Week_Start) y el domingo (Week_End)
         df['Week_Start'] = df['Inicio_Mx'] - pd.to_timedelta(df['Inicio_Mx'].dt.dayofweek, unit='D')
         df['Week_End'] = df['Week_Start'] + pd.to_timedelta(6, unit='D')
-        
-        # Etiqueta Final: Un solo cálculo para mayor eficiencia
-        df['Week_Label'] = (
-            'W' + df['Week_Number'].astype(str).str.zfill(2) + 
-            " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
-        )
-        # ----------------------------------------------------
+        df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2) + " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
 
-        # 5. Filtros Operativos
+        # Filtros y Cálculos de Productividad
         df = df[df['Inicio_Mx'] >= df['production_floor']].copy()
         df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
         df = df.sort_values(['Full_Name', 'Inicio_Mx'])
         
-        # 6. Métricas de Productividad
         df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
         df['Talk_Formatted'] = df['Talk_Secs'].apply(format_seconds)
         df['Shift_Start_Hour'] = df['Offset'].map({1: 7, 2: 8})
-        df['Shift_End_Hour'] = df['Offset'].map({1: 16, 2: 17})
         
-        # Cálculo de In-Between Idle
+        # GAP Analysis (SOS/EOS/Idle)
         df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
         df['In_Between_Idle'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
-        
-        # Marcadores de Inicio/Fin de Turno
         df['is_first'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='first')
         df['is_last'] = ~df.duplicated(subset=['Full_Name', 'Date_Only'], keep='last')
         
-        # Cálculos de SOS (Start of Shift) y EOS (End of Shift)
+        # Aplicamos la lógica de asistencia a la primera llamada de cada día
+        df['Attendance_Status'] = df.apply(
+            lambda x: get_attendance_status(x['login_dt'], x['Shift_Start_Hour']) if x['is_first'] else None, axis=1
+        )
+        
+        # Ready Gap: Diferencia entre login PC y primera llamada
+        df['Ready_Gap_Secs'] = (df['Inicio_Mx'] - df['login_dt']).dt.total_seconds().fillna(0)
+        df['Ready_Gap'] = df['Ready_Gap_Secs'].apply(lambda x: format_seconds(x) if x > 0 else "0:00:00")
+
+        # Cálculos de Gaps
         def calc_sos(row):
             if row['is_first']:
                 t_start = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Shift_Start_Hour'])
                 return max(0, (row['Inicio_Mx'] - t_start).total_seconds())
             return 0
-
         def calc_eos(row):
             if row['is_last']:
-                t_end = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Shift_End_Hour'])
+                t_end = datetime.combine(row['Date_Only'], datetime.min.time()) + timedelta(hours=row['Offset'].map({1: 16, 2: 17}))
                 return max(0, (t_end - row['Fin_Mx']).total_seconds())
             return 0
 
