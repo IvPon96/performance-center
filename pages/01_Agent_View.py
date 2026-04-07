@@ -106,8 +106,28 @@ if data is not None and not data.empty:
         final_table = attendance_log[['Date', 'Login PC', 'Status', 'First Call', 'Ready_Gap_Val', 'Last Call', 'SOS Gap', 'EOS Gap']]
         final_table.columns = ['Date', 'Login PC', 'Status', 'First Call', 'Ready Gap', 'Last Call', 'SOS Gap', 'EOS Gap']
 
+        # --- Función de Estilo (Añádela antes de mostrar la tabla) ---
+        def style_attendance(row):
+            color = ''
+            if row['Status'] == 'ON TIME':
+                color = 'background-color: #d4edda; color: #155724;' # Verde suave
+            elif row['Status'] == 'TARDY':
+                color = 'background-color: #fff3cd; color: #856404;' # Amarillo
+            elif row['Status'] == 'LATE':
+                color = 'background-color: #f8d7da; color: #721c24;' # Rojo suave
+            elif row['Status'] == 'NO LOG':
+                color = 'background-color: #e2e3e5; color: #383d41;' # Gris
+    
+            return [color if v == row['Status'] else '' for v in row]
+
         # Mostramos la tabla
-        st.table(final_table)
+        st.subheader("🚪 Attendance & Ready-to-Work Log")
+
+        # Aplicamos el estilo solo a la columna 'Status' para evitar colores accidentales en otras celdas
+        styled_table = final_table.style.apply(style_attendance, axis=1)
+
+        # Usamos dataframe en lugar de table para permitir el estilo
+        st.dataframe(styled_table, use_container_width=True, hide_index=True)
         
         st.caption("ℹ️ **Ready Gap:** Diferencia de tiempo entre el inicio de sesión en la PC (Controlio) y la primera llamada realizada (Dialpad).")
 
