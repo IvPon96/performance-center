@@ -1,16 +1,19 @@
-# v 1.5 - The weekly update
+# v1.6 - The controlio update
 import streamlit as st
 import plotly.express as px
 import pandas as pd
 from data_engine import load_and_process, format_seconds
 
+# 1. Configuración de página
 st.set_page_config(page_title="Agent Audit Deep-Dive", layout="wide")
 
+# 2. Carga de datos
 data = load_and_process()
 
 if data is not None and not data.empty:
     st.sidebar.header("Navigation Center")
     
+    # Filtros de Agente y Resolución
     agent_list = sorted(data['Full_Name'].unique())
     agent_sel = st.sidebar.selectbox("Select Agent", agent_list)
     df_agent = data[data['Full_Name'] == agent_sel].copy()
@@ -21,19 +24,15 @@ if data is not None and not data.empty:
     if view_level == "Daily":
         date_sel = st.sidebar.date_input("Select Day", df_agent['Date_Only'].max())
         df_final = df_agent[df_agent['Date_Only'] == date_sel].copy()
-    
     elif view_level == "Weekly":
-        # Las etiquetas ahora son descriptivas: W15 (Apr 07 - Apr 13)
         weeks = sorted(df_agent['Week_Label'].unique(), reverse=True)
         week_sel = st.sidebar.selectbox("Select Week Range", weeks)
         df_final = df_agent[df_agent['Week_Label'] == week_sel].copy()
-        
     elif view_level == "Monthly":
         months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
         avail_months = [m for m in months if m in df_agent['Month'].unique()]
         month_sel = st.sidebar.selectbox("Select Month", avail_months)
         df_final = df_agent[df_agent['Month'] == month_sel].copy()
-        
     else: # Quarterly
         quarters = sorted(df_agent['Quarter'].unique())
         q_sel = st.sidebar.selectbox("Select Quarter", quarters)
@@ -41,7 +40,7 @@ if data is not None and not data.empty:
 
     if not df_final.empty:
         st.title(f"👤 Audit: {agent_sel}")
-        st.markdown(f"**Resolution:** {view_level} | **Period:** {week_sel if view_level == 'Weekly' else 'Selected Range'}")
+        st.markdown(f"**Status:** Analysis Level {view_level}")
         st.markdown("---")
 
         # --- KPIs SUPERIORES ---
@@ -59,7 +58,6 @@ if data is not None and not data.empty:
 
         # --- VISUALES ---
         col_donut, col_trend = st.columns([1, 2])
-
         with col_donut:
             st.subheader("Time Distribution")
             fig_pie = px.pie(names=['Talk', 'Idle'], values=[talk_secs, idle_secs], hole=0.5,
@@ -82,29 +80,41 @@ if data is not None and not data.empty:
 
         st.markdown("---")
 
-        # --- SECCIÓN: LOGIN/LOGOUT ACTIVITY LOG (LO NUEVO) ---
-        st.subheader("🚪 Login/Logout Activity Log")
+        # --- SECCIÓN: ATTENDANCE & READY GAP LOG (EL CORAZÓN DE LA V2.1) ---
+        st.subheader("🚪 Attendance & Ready-to-Work Log")
         
-        # Agrupamos por día para obtener los bordes del turno
-        login_summary = df_final.groupby('Date_Only').agg(
+        # Agrupamos por día para obtener la "verdad" de ambos sistemas
+        attendance_log = df_final.groupby('Date_Only').agg(
+            PC_Login=('login_dt', 'min'),
+            Status=('Attendance_Status', 'first'),
             First_Call=('Inicio_Mx', 'min'),
+            Ready_Gap_Val=('Ready_Gap', 'first'),
             Last_Call=('Fin_Mx', 'max'),
             SOS_Gap=('SOS_Idle', 'sum'),
             EOS_Gap=('EOS_Idle', 'sum')
         ).reset_index()
 
-        # Formateamos para la tabla
-        login_summary['Date'] = login_summary['Date_Only'].astype(str)
-        login_summary['First Call'] = login_summary['First_Call'].dt.strftime('%H:%M:%S')
-        login_summary['Last Call'] = login_summary['Last_Call'].dt.strftime('%H:%M:%S')
-        login_summary['SOS Gap'] = login_summary['SOS_Gap'].apply(format_seconds)
-        login_summary['EOS Gap'] = login_summary['EOS_Gap'].apply(format_seconds)
+        # Formateo visual para la tabla
+        attendance_log['Date'] = attendance_log['Date_Only'].astype(str)
+        attendance_log['Login PC'] = attendance_log['PC_Login'].dt.strftime('%H:%M:%S').fillna("N/A")
+        attendance_log['First Call'] = attendance_log['First_Call'].dt.strftime('%H:%M:%S')
+        attendance_log['Last Call'] = attendance_log['Last_Call'].dt.strftime('%H:%M:%S')
+        attendance_log['SOS Gap'] = attendance_log['SOS_Gap'].apply(format_seconds)
+        attendance_log['EOS Gap'] = attendance_log['EOS_Gap'].apply(format_seconds)
+        
+        # Renombramos columnas para el usuario final
+        final_table = attendance_log[['Date', 'Login PC', 'Status', 'First Call', 'Ready_Gap_Val', 'Last Call', 'SOS Gap', 'EOS Gap']]
+        final_table.columns = ['Date', 'Login PC', 'Status', 'First Call', 'Ready Gap', 'Last Call', 'SOS Gap', 'EOS Gap']
 
-        # Mostramos la tabla con estilo
-        st.table(login_summary[['Date', 'First Call', 'Last Call', 'SOS Gap', 'EOS Gap']])
+        # Mostramos la tabla
+        st.table(final_table)
+        
+        st.caption("ℹ️ **Ready Gap:** Diferencia de tiempo entre el inicio de sesión en la PC (Controlio) y la primera llamada realizada (Dialpad).")
 
         # --- DETALLE DE LLAMADAS ---
         with st.expander("📄 View Call-by-Call Detail"):
             st.dataframe(df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'Talk_Formatted', 'external_number', 'Idle_Secs']].sort_values('Inicio_Mx'), use_container_width=True)
     else:
         st.warning("No data found for this selection.")
+else:
+    st.error("Engine failed to load data.")
