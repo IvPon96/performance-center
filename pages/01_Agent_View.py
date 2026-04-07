@@ -1,10 +1,18 @@
-# v2.4 - Social Media Auditor View
+# v2.5 - Fixed Scroll Feed
 import streamlit as st
 import plotly.express as px
 import pandas as pd
 from data_engine import load_and_process, format_seconds
 
 st.set_page_config(page_title="Agent Audit Center", layout="wide")
+
+# CSS inyectado para mejorar la estética del scroll y los títulos
+st.markdown("""
+    <style>
+    .stMetric { background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px; }
+    </style>
+""", unsafe_allow_html=True)
+
 data = load_and_process()
 
 if data is not None and not data.empty:
@@ -24,13 +32,11 @@ if data is not None and not data.empty:
     elif view_level == "Monthly":
         months = sorted(df_agent['Month'].unique())
         df_final = df_agent[df_agent['Month'] == st.sidebar.selectbox("Select Month", months)].copy()
-    else: # Quarterly
-        quarters = sorted(df_agent['Quarter'].unique())
-        df_final = df_agent[df_agent['Quarter'] == st.sidebar.selectbox("Select Quarter", quarters)].copy()
+    else:
+        df_final = df_agent[df_agent['Quarter'] == st.sidebar.selectbox("Select Quarter", sorted(df_agent['Quarter'].unique()))].copy()
 
     if not df_final.empty:
         st.title(f"👤 Audit: {agent_sel}")
-        st.markdown(f"**Analysis Level:** {view_level}")
 
         # --- KPI ROW ---
         talk_secs = df_final['Talk_Secs'].sum()
@@ -43,21 +49,21 @@ if data is not None and not data.empty:
 
         st.markdown("---")
 
-        # --- SECCIÓN 1: DISTRIBUCIÓN Y FEED VERTICAL ---
-        col_pie, col_feed = st.columns([1, 2])
+        # --- SECCIÓN SUPERIOR: DISTRIBUCIÓN Y FEED CON SCROLL ---
+        col_left, col_feed = st.columns([1, 2])
         
-        with col_pie:
+        with col_left:
             st.subheader("Time Distribution")
             fig_pie = px.pie(names=['Talk', 'Idle'], values=[talk_secs, idle_secs], hole=0.5, 
                              color_discrete_sequence=['#0066cc', '#E5E7E9'])
-            fig_pie.update_layout(height=300, margin=dict(t=0, b=0))
+            fig_pie.update_layout(height=280, margin=dict(t=20, b=20, l=0, r=0))
             st.plotly_chart(fig_pie, use_container_width=True)
             
-            # Health Check
             st.markdown("---")
             st.subheader("🎯 Operational Health")
             crit_count = len(df_final[df_final['Gap_Category'].isin(["Extended Idle", "Operational Gap"])])
             st.metric("Critical Gaps (>15m)", crit_count, delta="Review" if crit_count > 0 else "OK", delta_color="inverse")
+            
             doc_df = df_final[df_final['Gap_Category'] == "Standard Doc"]
             avg_doc = doc_df['In_Between_Idle'].mean() if not doc_df.empty else 0
             st.metric("Avg Doc Time", f"{int(avg_doc/60)}m {int(avg_doc%60)}s")
@@ -66,43 +72,46 @@ if data is not None and not data.empty:
         with col_feed:
             st.subheader("📱 Activity Feed (Daily Scroll)")
             days_in_period = sorted(df_final['Date_Only'].unique(), reverse=True)
-            display_limit = 7 # Límite para no sobrecargar el navegador
             
-            for i, day in enumerate(days_in_period[:display_limit]):
-                day_data = df_final[df_final['Date_Only'] == day]
-                st.caption(f"📅 **{day.strftime('%A, %b %d')}**")
-                fig_day = px.timeline(day_data, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
-                fig_day.update_layout(height=80, margin=dict(t=0, b=0, l=0, r=0), yaxis_visible=False,
-                                      xaxis=dict(showticklabels=True if i == display_limit-1 or i == len(days_in_period)-1 else False))
-                st.plotly_chart(fig_day, use_container_width=True, config={'displayModeBar': False})
-            
-            if len(days_in_period) > display_limit:
-                with st.expander("Show older days..."):
-                    for day in days_in_period[display_limit:]:
-                        day_data = df_final[df_final['Date_Only'] == day]
-                        st.caption(f"📅 **{day.strftime('%A, %b %d')}**")
-                        fig_day = px.timeline(day_data, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
-                        fig_day.update_layout(height=80, margin=dict(t=0, b=0), yaxis_visible=False)
-                        st.plotly_chart(fig_day, use_container_width=True, config={'displayModeBar': False})
+            # --- EL CONTENEDOR MÁGICO CON SCROLL ---
+            # Definimos una altura fija de 550px
+            with st.container(height=580):
+                for day in days_in_period:
+                    day_data = df_final[df_final['Date_Only'] == day]
+                    st.markdown(f"**📅 {day.strftime('%A, %b %d')}**")
+                    
+                    fig_day = px.timeline(day_data, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
+                    fig_day.update_layout(
+                        height=140, # Aumentado para que el eje X respire
+                        margin=dict(t=5, b=35, l=0, r=10), # b=35 evita que se corten los números
+                        yaxis_visible=False,
+                        xaxis=dict(
+                            title=None,
+                            showticklabels=True,
+                            dtick=3600000, # Una marca por hora
+                            tickformat="%H:%M"
+                        )
+                    )
+                    st.plotly_chart(fig_day, use_container_width=True, config={'displayModeBar': False})
+                    st.markdown("<br>", unsafe_allow_html=True) # Espacio entre días
 
         st.markdown("---")
 
-        # --- SECCIÓN 2: FRECUENCIA / TREND ---
-        if view_level == "Daily":
-            st.subheader("📊 Frequency (15m Intervals)")
-            freq_data = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
-            fig_bar = px.bar(freq_data, x='15m_Interval', y='Calls', color_discrete_sequence=['#00cc96'])
-        else:
-            st.subheader("📈 Daily Volume Trend")
-            trend_data = df_final.groupby('Date_Only').size().reset_index(name='Calls')
-            fig_bar = px.bar(trend_data, x='Date_Only', y='Calls', color_discrete_sequence=['#0066cc'])
-        
-        fig_bar.update_layout(height=300)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        # --- SECCIÓN INFERIOR: TENDENCIA Y LOG ---
+        col_bar, _ = st.columns([2, 1])
+        with col_bar:
+            if view_level == "Daily":
+                st.subheader("📊 Frequency (15m Intervals)")
+                freq_data = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
+                fig_bar = px.bar(freq_data, x='15m_Interval', y='Calls', color_discrete_sequence=['#00cc96'])
+            else:
+                st.subheader("📈 Daily Volume Trend")
+                trend_data = df_final.groupby('Date_Only').size().reset_index(name='Calls')
+                fig_bar = px.bar(trend_data, x='Date_Only', y='Calls', color_discrete_sequence=['#0066cc'])
+            
+            fig_bar.update_layout(height=300)
+            st.plotly_chart(fig_bar, use_container_width=True)
 
-        st.markdown("---")
-
-        # --- LOG DETALLADO PARA AUDITORÍA ---
         st.subheader("📋 Detailed Operational Log (Audit Mode)")
         df_log = df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'num_str', 'Talk_Secs', 'In_Between_Idle', 'Gap_Category', 'is_repeat']].copy()
         df_log['Date'] = df_log['Date_Only'].astype(str)
@@ -130,5 +139,3 @@ if data is not None and not data.empty:
 
     else:
         st.warning("No data found for this period.")
-else:
-    st.error("Engine failed to load data.")
