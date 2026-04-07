@@ -1,132 +1,67 @@
-# v2.2 - Strategic Navigation & Audit PRO
+# v2.1 - Enterprise Auditor Engine
 import streamlit as st
-import plotly.express as px
 import pandas as pd
-from data_engine import load_and_process, format_seconds
+from datetime import timedelta, datetime
 
-st.set_page_config(page_title="Agent Audit Center", layout="wide")
-data = load_and_process()
+def format_seconds(seconds):
+    if pd.isna(seconds) or seconds <= 0: return "0:00:00"
+    return str(timedelta(seconds=int(seconds)))
 
-if data is not None and not data.empty:
-    st.sidebar.header("Navigation Center")
-    agent_sel = st.sidebar.selectbox("Select Agent", sorted(data['Full_Name'].unique()))
-    df_agent = data[data['Full_Name'] == agent_sel].copy()
-    
-    # --- RESTAURACIÓN DE SELECTORES ---
-    view_level = st.sidebar.radio("Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
-    
-    if view_level == "Daily":
-        date_sel = st.sidebar.date_input("Select Day", df_agent['Date_Only'].max())
-        df_final = df_agent[df_agent['Date_Only'] == date_sel].copy()
-    elif view_level == "Weekly":
-        weeks = sorted(df_agent['Week_Label'].unique(), reverse=True)
-        week_sel = st.sidebar.selectbox("Select Week", weeks)
-        df_final = df_agent[df_agent['Week_Label'] == week_sel].copy()
-    elif view_level == "Monthly":
-        months = sorted(df_agent['Month'].unique())
-        month_sel = st.sidebar.selectbox("Select Month", months)
-        df_final = df_agent[df_agent['Month'] == month_sel].copy()
-    else: # Quarterly
-        quarters = sorted(df_agent['Quarter'].unique())
-        q_sel = st.sidebar.selectbox("Select Quarter", quarters)
-        df_final = df_agent[df_agent['Quarter'] == q_sel].copy()
+def categorize_gap_strategic(seconds, is_max_gap):
+    if seconds <= 180: return "Standard Doc"
+    if seconds <= 900: return "Micro-Gap"
+    if is_max_gap and seconds > 2700: return "🥗 Likely Lunch" # Emoji integrado
+    if seconds <= 3600: return "Extended Idle"
+    return "Operational Gap"
 
-    if not df_final.empty:
-        st.title(f"👤 Auditoría: {agent_sel}")
-        st.markdown(f"**Análisis:** {view_level}")
+@st.cache_data(ttl=600)
+def load_and_process():
+    SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
+    try:
+        df = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0")
+        dim = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=1947121871")
+        df.columns = df.columns.str.strip(); dim.columns = dim.columns.str.strip()
         
-        # --- KPIs ---
-        talk_secs = df_final['Talk_Secs'].sum()
-        idle_secs = df_final['In_Between_Idle'].sum()
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Talk Time", format_seconds(talk_secs))
-        c2.metric("Idle Between Calls", format_seconds(idle_secs))
-        c3.metric("Total Calls", len(df_final))
-        c4.metric("Repeated Numbers 🚨", len(df_final[df_final['is_repeat'] == True]))
-
-        st.markdown("---")
-
-        # --- FILA 1 DE GRÁFICOS ---
-        col_pie, col_trend = st.columns([1, 2])
-        with col_pie:
-            st.subheader("Time Distribution")
-            fig_pie = px.pie(names=['Talk', 'Idle'], values=[talk_secs, idle_secs], hole=0.5, color_discrete_sequence=['#0066cc', '#E5E7E9'])
-            fig_pie.update_layout(margin=dict(t=20, b=20, l=0, r=0), height=300)
-            st.plotly_chart(fig_pie, use_container_width=True)
+        df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor', 'Controlio_ID']], 
+                      left_on='email', right_on='Master_Email', how='left')
+        df['Full_Name'] = df['Full_Name'].fillna(df['name'])
         
-        with col_trend:
-            if view_level == "Daily":
-                st.subheader("Intraday Activity Pulse")
-                fig = px.timeline(df_final, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
-                fig.update_layout(yaxis_visible=False, height=300)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.subheader("Daily Volume Trend")
-                trend_data = df_final.groupby('Date_Only').size().reset_index(name='Call_Count')
-                fig = px.bar(trend_data, x='Date_Only', y='Call_Count', color_discrete_sequence=['#0066cc'])
-                fig.update_layout(height=300)
-                st.plotly_chart(fig, use_container_width=True)
+        df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
+        df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
 
-        # --- FILA 2: FRECUENCIA (Solo para Daily) ---
-        if view_level == "Daily":
-            st.subheader("📊 Frecuencia de Marcación (15-Minute Intervals)")
-            freq_15m = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
-            fig_15 = px.bar(freq_15m, x='15m_Interval', y='Calls', 
-                            labels={'15m_Interval': 'Intervalo (15m)', 'Calls': 'Llamadas'},
-                            color_discrete_sequence=['#00cc96'])
-            fig_15.update_layout(height=300)
-            st.plotly_chart(fig_15, use_container_width=True)
-
-        st.markdown("---")
-
-        # --- HEALTH CHECK ---
-        st.subheader("🎯 Operational Health Check")
-        h1, h2, h3 = st.columns(3)
-        crit_count = len(df_final[df_final['Gap_Category'].isin(["Extended Idle", "Operational Gap"])])
-        h1.metric("Critical Gaps (>15m)", crit_count, delta="Atención" if crit_count > 0 else "OK", delta_color="inverse")
+        def get_offset(dt):
+            if pd.isna(dt): return 2
+            # Ajuste simple DST
+            return 1 if datetime(dt.year, 3, 8) <= dt < datetime(dt.year, 11, 1) else 2
         
-        doc_df = df_final[df_final['Gap_Category'] == "Standard Doc"]
-        avg_doc = doc_df['In_Between_Idle'].mean() if not doc_df.empty else 0
-        h2.metric("Avg Doc Time", f"{int(avg_doc/60)}m {int(avg_doc%60)}s")
-        h3.metric("Lunch Detection", "Detected ✅" if "🥗 Likely Lunch" in df_final['Gap_Category'].values else "Not Found ❌")
-
-        st.markdown("---")
-
-        # --- LOG DETALLADO DE AUDITORÍA ---
-        st.subheader("📋 Detailed Operational Log (Audit Mode)")
+        df['Offset'] = df['date_started'].apply(get_offset)
+        df['Inicio_Mx'] = df['date_started'] + pd.to_timedelta(df['Offset'], unit='h')
+        df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
+        df['Date_Only'] = df['Inicio_Mx'].dt.date
         
-        df_log = df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'num_str', 'Talk_Secs', 'In_Between_Idle', 'Gap_Category', 'is_repeat']].copy()
-        df_log['Date'] = df_log['Date_Only'].astype(str)
-        df_log['Start'] = df_log['Inicio_Mx'].dt.strftime('%H:%M:%S')
-        df_log['Finished'] = df_log['Fin_Mx'].dt.strftime('%H:%M:%S')
-        df_log['Talk'] = df_log['Talk_Secs'].apply(format_seconds)
-        df_log['Idle After'] = df_log['In_Between_Idle'].apply(format_seconds)
+        # --- NUEVA LÓGICA DE INTERVALOS DE 15 MINUTOS ---
+        # Redondeamos hacia abajo a los 15 min más cercanos (00, 15, 30, 45)
+        df['15m_Interval'] = df['Inicio_Mx'].dt.floor('15min').dt.strftime('%H:%M')
         
-        final_table = df_log[['Date', 'Start', 'Finished', 'num_str', 'Talk', 'Idle After', 'Gap_Category', 'is_repeat']]
-        final_table.columns = ['Date', 'Start', 'Finished', 'Number', 'Talk', 'Idle After', 'Category', 'Repeated']
+        df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
+        df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
+        df = df.sort_values(['Full_Name', 'Inicio_Mx'])
+        
+        # Auditoría de repetición pura
+        df['prev_num'] = df.groupby(['Full_Name', 'Date_Only'])['num_str'].shift()
+        df['is_repeat'] = (df['num_str'] == df['prev_num']) & (df['num_str'] != '0')
+        
+        df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
+        df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
+        df['In_Between_Idle'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
+        
+        df['max_gap_day'] = df.groupby(['Full_Name', 'Date_Only'])['In_Between_Idle'].transform('max')
+        df['is_max_gap'] = (df['In_Between_Idle'] == df['max_gap_day']) & (df['In_Between_Idle'] > 2700)
+        df['Gap_Category'] = df.apply(lambda x: categorize_gap_strategic(x['In_Between_Idle'], x['is_max_gap']), axis=1)
 
-        def style_audit_v2(row):
-            styles = [''] * len(row)
-            cols = list(final_table.columns)
-            
-            # Número repetido en Rojo Oscuro
-            if row['Repeated']:
-                styles[cols.index('Number')] = 'color: #8b0000; font-weight: bold;'
-            
-            # Colores de Categoría
-            cat_idx = cols.index('Category')
-            cat = row['Category']
-            if "Standard Doc" in cat: styles[cat_idx] = 'color: #28a745;'
-            elif "Micro-Gap" in cat: styles[cat_idx] = 'color: #ffc107;'
-            elif "Extended Idle" in cat: styles[cat_idx] = 'color: #fd7e14;'
-            elif "Operational Gap" in cat: styles[cat_idx] = 'color: #dc3545; font-weight: bold;'
-            elif "🥗 Likely Lunch" in cat: styles[cat_idx] = 'color: #6f42c1; font-weight: bold;'
-            
-            return styles
-
-        st.dataframe(final_table.style.apply(style_audit_v2, axis=1), use_container_width=True, hide_index=True)
-
-    else:
-        st.warning("No data found for this period.")
-else:
-    st.error("Engine failed to load data.")
+        df['Month'] = df['Inicio_Mx'].dt.month_name()
+        df['Week_Label'] = 'W' + df['Inicio_Mx'].dt.isocalendar().week.astype(str).str.zfill(2)
+        
+        return df
+    except Exception as e:
+        st.error(f"Error Engine: {e}"); return None
