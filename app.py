@@ -64,7 +64,7 @@ if check_password():
                 "<br><span style='color:#0066cc; font-size:10px;'>Talk: " + df_dia['Talk_Sum'].apply(format_seconds) + "</span>"
             )
 
-            st.subheader(f"Fleet Pulse Monitor - {date_sel}")
+            st.subheader(f"Operation Pulse Monitor - {date_sel}")
             fig = px.timeline(df_dia, x_start="Inicio_Mx", x_end="Fin_Mx", y="Chart_Label", color="Full_Name", template="plotly_white",
                               hover_data={"Chart_Label": False, "Full_Name": True, "Talk_Formatted": True, "external_number": True})
             fig.update_layout(height=650, showlegend=False, paper_bgcolor="#E5E7E9", plot_bgcolor="white")
