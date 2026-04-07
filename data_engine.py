@@ -1,4 +1,4 @@
-# v2.2 - Mandatory Dimensions Fix (CORRECTED FLOW)
+# v2.3 - Global Engine Fix
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -18,48 +18,42 @@ def categorize_gap_strategic(seconds, is_max_gap):
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
     try:
-        # 1. CARGA DE DATOS
+        # 1. Carga
         df = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0")
         dim = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=1947121871")
         df.columns = df.columns.str.strip(); dim.columns = dim.columns.str.strip()
         
-        # 2. MERGE CON DIM_AGENTS
+        # 2. Merge
         df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor', 'Controlio_ID']], 
                       left_on='email', right_on='Master_Email', how='left')
         df['Full_Name'] = df['Full_Name'].fillna(df['name'])
         
-        # 3. PROCESAMIENTO DE FECHAS BÁSICO
+        # 3. Fechas y Offset (México)
         df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
         df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
 
-        # 4. LÓGICA DE TIEMPOS MÉXICO (OFFSET)
         def get_offset(dt):
             if pd.isna(dt): return 2
-            # Ajuste simple DST
             return 1 if datetime(dt.year, 3, 8) <= dt < datetime(dt.year, 11, 1) else 2
         
         df['Offset'] = df['date_started'].apply(get_offset)
         df['Inicio_Mx'] = df['date_started'] + pd.to_timedelta(df['Offset'], unit='h')
         df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
         df['Date_Only'] = df['Inicio_Mx'].dt.date
-
-        # 5. ASEGURAMOS LAS DIMENSIONES (Quarter, Week, Month)
-        # Esto debe ir DESPUÉS de crear Inicio_Mx
+        
+        # 4. DIMENSIONES (Mandatorio antes de cualquier filtro)
         df['Month'] = df['Inicio_Mx'].dt.month_name()
         df['Quarter'] = 'Q' + df['Inicio_Mx'].dt.quarter.astype(str)
         df['Week_Number'] = df['Inicio_Mx'].dt.isocalendar().week
         df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2)
-        df['Quarter'] = df['Quarter'].fillna("Q-Unknown")
-        
-        # 6. LÓGICA DE INTERVALOS Y NÚMEROS
         df['15m_Interval'] = df['Inicio_Mx'].dt.floor('15min').dt.strftime('%H:%M')
-        df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
         
-        # 7. FILTROS Y ORDEN
+        # 5. Limpieza de Números y Filtros
+        df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
         df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
         df = df.sort_values(['Full_Name', 'Inicio_Mx'])
         
-        # 8. AUDITORÍA DE REPETICIÓN Y GAPS
+        # 6. Auditoría y Gaps
         df['prev_num'] = df.groupby(['Full_Name', 'Date_Only'])['num_str'].shift()
         df['is_repeat'] = (df['num_str'] == df['prev_num']) & (df['num_str'] != '0')
         
@@ -67,13 +61,10 @@ def load_and_process():
         df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
         df['In_Between_Idle'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
         
-        # 9. LÓGICA DE LUNCH
         df['max_gap_day'] = df.groupby(['Full_Name', 'Date_Only'])['In_Between_Idle'].transform('max')
         df['is_max_gap'] = (df['In_Between_Idle'] == df['max_gap_day']) & (df['In_Between_Idle'] > 2700)
         df['Gap_Category'] = df.apply(lambda x: categorize_gap_strategic(x['In_Between_Idle'], x['is_max_gap']), axis=1)
 
         return df
-
     except Exception as e:
-        st.error(f"Error Crítico en el Engine: {e}")
-        return None
+        st.error(f"Error Engine: {e}"); return None
