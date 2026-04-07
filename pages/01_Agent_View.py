@@ -1,4 +1,4 @@
-# v2.0 - Tactical Operations Center
+# v2.1 - Enterprise Tactical View
 import streamlit as st
 import plotly.express as px
 import pandas as pd
@@ -10,20 +10,15 @@ data = load_and_process()
 if data is not None and not data.empty:
     agent_sel = st.sidebar.selectbox("Select Agent", sorted(data['Full_Name'].unique()))
     df_agent = data[data['Full_Name'] == agent_sel].copy()
-    view_level = st.sidebar.radio("Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
     
-    # Filtrado Dinámico (Daily, Weekly, etc.)
-    if view_level == "Daily":
-        date_sel = st.sidebar.date_input("Select Day", df_agent['Date_Only'].max())
-        df_final = df_agent[df_agent['Date_Only'] == date_sel].copy()
-    else:
-        # Simplificado: puedes reinsertar aquí tu lógica de Week_Label/Month
-        df_final = df_agent.copy()
+    # Filtro Daily para ver el detalle de 15m
+    date_sel = st.sidebar.date_input("Select Day", df_agent['Date_Only'].max())
+    df_final = df_agent[df_agent['Date_Only'] == date_sel].copy()
 
     if not df_final.empty:
         st.title(f"👤 Auditoría: {agent_sel}")
         
-        # --- KPI ROW ---
+        # --- KPIs ---
         talk_secs = df_final['Talk_Secs'].sum()
         idle_secs = df_final['In_Between_Idle'].sum()
         c1, c2, c3, c4 = st.columns(4)
@@ -34,15 +29,29 @@ if data is not None and not data.empty:
 
         st.markdown("---")
 
-        # --- NUEVA FILA: FRECUENCIA DE MARCACIÓN POR HORA ---
-        st.subheader("📊 Frecuencia de Marcación (Hourly Activity)")
-        # Agrupamos por hora y contamos llamadas
-        hourly_data = df_final.groupby('Hour').size().reset_index(name='Calls')
-        fig_hour = px.bar(hourly_data, x='Hour', y='Calls', 
-                          labels={'Hour': 'Hora del Día (24h)', 'Calls': 'Número de Llamadas'},
-                          color_discrete_sequence=['#0066cc'])
-        fig_hour.update_layout(height=300, xaxis=dict(tickmode='linear'))
-        st.plotly_chart(fig_hour, use_container_width=True)
+        # --- FILA 1 DE GRÁFICOS (DISTRIBUCIÓN Y TREND) ---
+        col_pie, col_trend = st.columns([1, 2])
+        with col_pie:
+            st.subheader("Time Distribution")
+            fig_pie = px.pie(names=['Talk', 'Idle'], values=[talk_secs, idle_secs], hole=0.5, color_discrete_sequence=['#0066cc', '#E5E7E9'])
+            fig_pie.update_layout(margin=dict(t=20, b=20, l=0, r=0), height=300)
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        with col_trend:
+            st.subheader("Intraday Activity Pulse")
+            fig = px.timeline(df_final, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
+            fig.update_layout(yaxis_visible=False, height=300)
+            st.plotly_chart(fig, use_container_width=True)
+
+        # --- NUEVA FILA: FRECUENCIA DE 15 MINUTOS ---
+        st.subheader("📊 Frecuencia de Marcación (15-Minute Intervals)")
+        # Agrupamos por el nuevo intervalo de 15m
+        freq_15m = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
+        fig_15 = px.bar(freq_15m, x='15m_Interval', y='Calls', 
+                        labels={'15m_Interval': 'Intervalo (15m)', 'Calls': 'Llamadas'},
+                        color_discrete_sequence=['#00cc96']) # Un verde esmeralda para diferenciar
+        fig_15.update_layout(height=300)
+        st.plotly_chart(fig_15, use_container_width=True)
 
         st.markdown("---")
 
@@ -55,14 +64,13 @@ if data is not None and not data.empty:
         doc_df = df_final[df_final['Gap_Category'] == "Standard Doc"]
         avg_doc = doc_df['In_Between_Idle'].mean() if not doc_df.empty else 0
         h2.metric("Avg Doc Time", f"{int(avg_doc/60)}m {int(avg_doc%60)}s")
-        h3.metric("Lunch Detection", "Detected ✅" if "Likely Lunch" in df_final['Gap_Category'].values else "Not Found ❌")
+        h3.metric("Lunch Detection", "Detected ✅" if "🥗 Likely Lunch" in df_final['Gap_Category'].values else "Not Found ❌")
 
         st.markdown("---")
 
         # --- LOG DETALLADO PARA AUDITORÍA ---
         st.subheader("📋 Detailed Operational Log (Audit Mode)")
         
-        # Preparamos el DF de visualización con Fecha
         df_log = df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'num_str', 'Talk_Secs', 'In_Between_Idle', 'Gap_Category', 'is_repeat']].copy()
         df_log['Date'] = df_log['Date_Only'].astype(str)
         df_log['Start'] = df_log['Inicio_Mx'].dt.strftime('%H:%M:%S')
@@ -70,22 +78,30 @@ if data is not None and not data.empty:
         df_log['Talk'] = df_log['Talk_Secs'].apply(format_seconds)
         df_log['Idle After'] = df_log['In_Between_Idle'].apply(format_seconds)
         
-        # Seleccionamos y renombramos para el usuario
         final_table = df_log[['Date', 'Start', 'Finished', 'num_str', 'Talk', 'Idle After', 'Gap_Category', 'is_repeat']]
         final_table.columns = ['Date', 'Start', 'Finished', 'Number', 'Talk', 'Idle After', 'Category', 'Repeated']
 
-        def style_audit(row):
+        # --- FUNCIÓN DE ESTILO REFINADA (SOLO TEXTO) ---
+        def style_audit_v2(row):
             styles = [''] * len(row)
-            # Resaltar repeticiones en Rojo/Naranja para auditoría
+            cols = list(final_table.columns)
+            
+            # 1. Decoys: Texto Rojo Oscuro en el Número
             if row['Repeated']:
-                styles[list(final_table.columns).index('Number')] = 'background-color: #721c24; color: white; font-weight: bold;'
-            # Colores para categorías
-            cat_idx = list(final_table.columns).index('Category')
-            if row['Category'] == "Likely Lunch": styles[cat_idx] = 'color: #28a745;'
-            elif row['Category'] == "Operational Gap": styles[cat_idx] = 'color: #dc3545; font-weight: bold;'
+                styles[cols.index('Number')] = 'color: #8b0000; font-weight: bold;'
+            
+            # 2. Categorías: Solo Color de Texto
+            cat_idx = cols.index('Category')
+            cat = row['Category']
+            if "Standard Doc" in cat: styles[cat_idx] = 'color: #28a745;'
+            elif "Micro-Gap" in cat: styles[cat_idx] = 'color: #ffc107;'
+            elif "Extended Idle" in cat: styles[cat_idx] = 'color: #fd7e14;'
+            elif "Operational Gap" in cat: styles[cat_idx] = 'color: #dc3545; font-weight: bold;'
+            elif "🥗 Likely Lunch" in cat: styles[cat_idx] = 'color: #6f42c1; font-weight: bold;' # Púrpura contrastante
+            
             return styles
 
-        st.dataframe(final_table.style.apply(style_audit, axis=1), use_container_width=True, hide_index=True)
+        st.dataframe(final_table.style.apply(style_audit_v2, axis=1), use_container_width=True, hide_index=True)
 
     else:
         st.warning("No data found.")
