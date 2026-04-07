@@ -93,17 +93,34 @@ def load_and_process():
         df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
         df['Date_Only'] = df['Inicio_Mx'].dt.date
         
-        # --- INTEGRACIÓN CON CONTROLIO ---
+        # --- INTEGRACIÓN CON CONTROLIO (REFORZADA) ---
+        # Inicializamos las columnas como vacías para evitar el KeyError
+        df['login_dt'] = pd.NaT
+        df['logout_dt'] = pd.NaT
+        df['Attendance_Status'] = "NO LOG"
+        df['Ready_Gap'] = "0:00:00"
+        df['Ready_Gap_Secs'] = 0
+
         df_con = load_controlio()
-        if df_con is not None:
-            # Traemos la data de Controlio al DataFrame de Dialpad
-            # Unimos por el ID de computadora y la fecha
+        
+        if df_con is not None and not df_con.empty:
+            # Intentamos la unión
+            df = df.drop(columns=['login_dt', 'logout_dt'], errors='ignore') # Limpiamos las temporales
             df = df.merge(
                 df_con[['user_name', 'date_dt', 'login_dt', 'logout_dt']],
                 left_on=['Controlio_ID', 'Date_Only'],
                 right_on=['user_name', 'date_dt'],
                 how='left'
             )
+            
+            # Recalculamos los status solo si hubo match
+            df['Attendance_Status'] = df.apply(
+                lambda x: get_attendance_status(x['login_dt'], x['Shift_Start_Hour']) if x['is_first'] else None, axis=1
+            )
+            
+            # Cálculo del Ready Gap: $Ready\_Gap = Inicio\_Mx - login\_dt$
+            df['Ready_Gap_Secs'] = (df['Inicio_Mx'] - df['login_dt']).dt.total_seconds().fillna(0)
+            df['Ready_Gap'] = df['Ready_Gap_Secs'].apply(lambda x: format_seconds(x) if x > 0 else "0:00:00")
 
         # Dimensiones Temporales
         df['Year'] = df['Inicio_Mx'].dt.year
