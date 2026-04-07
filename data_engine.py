@@ -1,4 +1,4 @@
-# v2.0 - Strategic Auditor Engine
+# v2.1 - Enterprise Auditor Engine
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -10,7 +10,7 @@ def format_seconds(seconds):
 def categorize_gap_strategic(seconds, is_max_gap):
     if seconds <= 180: return "Standard Doc"
     if seconds <= 900: return "Micro-Gap"
-    if is_max_gap and seconds > 2700: return "Likely Lunch"
+    if is_max_gap and seconds > 2700: return "🥗 Likely Lunch" # Emoji integrado
     if seconds <= 3600: return "Extended Idle"
     return "Operational Gap"
 
@@ -26,46 +26,40 @@ def load_and_process():
                       left_on='email', right_on='Master_Email', how='left')
         df['Full_Name'] = df['Full_Name'].fillna(df['name'])
         
-        # Procesamiento de Tiempos
         df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
         df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
 
         def get_offset(dt):
             if pd.isna(dt): return 2
-            year = dt.year
-            dst_start = datetime(year, 3, 8) 
-            dst_end = datetime(year, 11, 1)
-            return 1 if dst_start <= dt < dst_end else 2
+            # Ajuste simple DST
+            return 1 if datetime(dt.year, 3, 8) <= dt < datetime(dt.year, 11, 1) else 2
         
         df['Offset'] = df['date_started'].apply(get_offset)
         df['Inicio_Mx'] = df['date_started'] + pd.to_timedelta(df['Offset'], unit='h')
         df['Fin_Mx'] = df['date_ended'] + pd.to_timedelta(df['Offset'], unit='h')
         df['Date_Only'] = df['Inicio_Mx'].dt.date
-        df['Hour'] = df['Inicio_Mx'].dt.hour # Nueva columna para frecuencia
         
-        # Limpieza de Números para Auditoría
+        # --- NUEVA LÓGICA DE INTERVALOS DE 15 MINUTOS ---
+        # Redondeamos hacia abajo a los 15 min más cercanos (00, 15, 30, 45)
+        df['15m_Interval'] = df['Inicio_Mx'].dt.floor('15min').dt.strftime('%H:%M')
+        
         df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
-        
         df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
         df = df.sort_values(['Full_Name', 'Inicio_Mx'])
         
-        # --- NUEVA LÓGICA DE AUDITORÍA (Consecutive Repeat) ---
+        # Auditoría de repetición pura
         df['prev_num'] = df.groupby(['Full_Name', 'Date_Only'])['num_str'].shift()
-        # Ahora marcamos SIEMPRE que el número sea igual al anterior, sin importar el tiempo
         df['is_repeat'] = (df['num_str'] == df['prev_num']) & (df['num_str'] != '0')
         
         df['Talk_Secs'] = pd.to_numeric(df['talk_duration'], errors='coerce').fillna(0) * 60
         df['Prev_End'] = df.groupby(['Full_Name', 'Date_Only'])['Fin_Mx'].shift()
         df['In_Between_Idle'] = (df['Inicio_Mx'] - df['Prev_End']).dt.total_seconds().fillna(0)
         
-        # Gaps
         df['max_gap_day'] = df.groupby(['Full_Name', 'Date_Only'])['In_Between_Idle'].transform('max')
         df['is_max_gap'] = (df['In_Between_Idle'] == df['max_gap_day']) & (df['In_Between_Idle'] > 2700)
         df['Gap_Category'] = df.apply(lambda x: categorize_gap_strategic(x['In_Between_Idle'], x['is_max_gap']), axis=1)
 
-        # Dimensiones Temporales
         df['Month'] = df['Inicio_Mx'].dt.month_name()
-        df['Quarter'] = 'Q' + df['Inicio_Mx'].dt.quarter.astype(str)
         df['Week_Label'] = 'W' + df['Inicio_Mx'].dt.isocalendar().week.astype(str).str.zfill(2)
         
         return df
