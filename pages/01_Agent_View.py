@@ -38,7 +38,7 @@ if data is not None and not data.empty:
         df_final = df_agent[df_agent['Quarter'] == st.sidebar.selectbox("Select Quarter", quarters)].copy()
 
     if not df_final.empty:
-        st.title(f"👤 Auditoría de HITL: {agent_sel}")
+        st.title(f"👤 HITL individual audit: {agent_sel}")
 
         # --- KPI ROW SUPERIOR ---
         talk_secs = df_final['Talk_Secs'].sum()
@@ -87,7 +87,7 @@ if data is not None and not data.empty:
         
         with mid_bar:
             if view_level == "Daily":
-                st.subheader("📊 Frecuencia (15m Intervals)")
+                st.subheader("📊 Frquency (15m Intervals)")
                 freq_data = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
                 fig_metric = px.bar(freq_data, x='15m_Interval', y='Calls', color_discrete_sequence=['#00cc96'])
             else:
