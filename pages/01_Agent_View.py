@@ -1,4 +1,4 @@
-# v2.2 - Strategic Layout Update
+# v2.3 - Operational Master Layout
 import streamlit as st
 import plotly.express as px
 import pandas as pd
@@ -8,13 +8,12 @@ st.set_page_config(page_title="Agent Audit Center", layout="wide")
 data = load_and_process()
 
 if data is not None and not data.empty:
-    st.sidebar.header("Control Panel")
+    st.sidebar.header("Navigation")
     agent_sel = st.sidebar.selectbox("Select Agent", sorted(data['Full_Name'].unique()))
     df_agent = data[data['Full_Name'] == agent_sel].copy()
-    
     view_level = st.sidebar.radio("Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
     
-    # --- FILTRADO POR NIVEL ---
+    # Filtrado
     if view_level == "Daily":
         date_sel = st.sidebar.date_input("Select Day", df_agent['Date_Only'].max())
         df_final = df_agent[df_agent['Date_Only'] == date_sel].copy()
@@ -24,77 +23,91 @@ if data is not None and not data.empty:
     elif view_level == "Monthly":
         months = sorted(df_agent['Month'].unique())
         df_final = df_agent[df_agent['Month'] == st.sidebar.selectbox("Select Month", months)].copy()
-    else: # Quarterly
-        q_options = sorted(df_agent['Quarter'].unique())
-        df_final = df_agent[df_agent['Quarter'] == st.sidebar.selectbox("Select Quarter", q_options)].copy()
+    else:
+        quarters = sorted(df_agent['Quarter'].unique())
+        df_final = df_agent[df_agent['Quarter'] == st.sidebar.selectbox("Select Quarter", quarters)].copy()
 
     if not df_final.empty:
-        st.title(f"👤 Auditoría: {agent_sel}")
-        st.markdown(f"**Análisis de Nivel:** {view_level}")
+        st.title(f"👤 Audit: {agent_sel}")
 
-        # --- KPI ROW ---
-        talk_secs = df_final['Talk_Secs'].sum()
-        idle_secs = df_final['In_Between_Idle'].sum()
+        # --- KPIs ---
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Talk Time", format_seconds(talk_secs))
-        c2.metric("Idle Between Calls", format_seconds(idle_secs))
+        c1.metric("Talk Time", format_seconds(df_final['Talk_Secs'].sum()))
+        c2.metric("Idle Between", format_seconds(df_final['In_Between_Idle'].sum()))
         c3.metric("Total Calls", len(df_final))
-        c4.metric("Repeated Numbers 🚨", len(df_final[df_final['is_repeat'] == True]))
+        c4.metric("Repeated 🚨", len(df_final[df_final['is_repeat']]))
 
         st.markdown("---")
 
-        # --- FILA 1: DISTRIBUTION & TIMELINE PULSE ---
+        # --- FILA 1: DISTRIBUTION & PULSE ---
         col_pie, col_pulse = st.columns([1, 2])
-        
         with col_pie:
             st.subheader("Time Distribution")
-            fig_pie = px.pie(names=['Talk', 'Idle'], values=[talk_secs, idle_secs], hole=0.5, color_discrete_sequence=['#0066cc', '#E5E7E9'])
-            fig_pie.update_layout(margin=dict(t=20, b=20, l=0, r=0), height=350)
+            fig_pie = px.pie(names=['Talk', 'Idle'], values=[df_final['Talk_Secs'].sum(), df_final['In_Between_Idle'].sum()], 
+                             hole=0.5, color_discrete_sequence=['#0066cc', '#E5E7E9'])
+            fig_pie.update_layout(height=350, margin=dict(t=30, b=0, l=0, r=0))
             st.plotly_chart(fig_pie, use_container_width=True)
         
         with col_pulse:
             st.subheader("Intraday Activity Pulse")
-            # Timeline con Slider para navegar entre días en vistas largas
-            fig_pulse = px.timeline(df_final, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
-            fig_pulse.update_layout(
-                yaxis_visible=False, 
-                height=350,
-                xaxis=dict(rangeslider=dict(visible=True), type='date')
-            )
+            # En vistas largas, apilamos por fecha en el eje Y para que sea vertical
+            y_axis = "Full_Name" if view_level == "Daily" else "Date_Only"
+            fig_pulse = px.timeline(df_final, x_start="Inicio_Mx", x_end="Fin_Mx", y=y_axis, color_discrete_sequence=['#0066cc'])
+            fig_pulse.update_layout(height=350, xaxis=dict(rangeslider=dict(visible=True), type='date'))
             st.plotly_chart(fig_pulse, use_container_width=True)
 
         st.markdown("---")
 
-        # --- FILA 2: FREQUENCY / TREND & HEALTH CHECK ---
-        col_metric, col_health = st.columns([2, 1])
-        
-        with col_metric:
+        # --- FILA 2: FREQUENCY/TREND & HEALTH ---
+        col_bar, col_health = st.columns([2, 1])
+        with col_bar:
             if view_level == "Daily":
-                st.subheader("📊 Frecuencia de Marcación (15m Intervals)")
+                st.subheader("📊 Frequency (15m Intervals)")
                 freq_data = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
-                fig_metric = px.bar(freq_data, x='15m_Interval', y='Calls', color_discrete_sequence=['#00cc96'])
+                fig_bar = px.bar(freq_data, x='15m_Interval', y='Calls', color_discrete_sequence=['#00cc96'])
             else:
                 st.subheader("📈 Daily Volume Trend")
                 trend_data = df_final.groupby('Date_Only').size().reset_index(name='Calls')
-                fig_metric = px.bar(trend_data, x='Date_Only', y='Calls', color_discrete_sequence=['#0066cc'])
-            
-            fig_metric.update_layout(height=350)
-            st.plotly_chart(fig_metric, use_container_width=True)
-            
+                fig_bar = px.bar(trend_data, x='Date_Only', y='Calls', color_discrete_sequence=['#0066cc'])
+            fig_bar.update_layout(height=350)
+            st.plotly_chart(fig_bar, use_container_width=True)
+
         with col_health:
             st.subheader("🎯 Operational Health")
-            st.write("") # Espaciador
             crit_count = len(df_final[df_final['Gap_Category'].isin(["Extended Idle", "Operational Gap"])])
             st.metric("Critical Gaps (>15m)", crit_count, delta="Atención" if crit_count > 0 else "OK", delta_color="inverse")
-            
             doc_df = df_final[df_final['Gap_Category'] == "Standard Doc"]
             avg_doc = doc_df['In_Between_Idle'].mean() if not doc_df.empty else 0
             st.metric("Avg Doc Time", f"{int(avg_doc/60)}m {int(avg_doc%60)}s")
-            
-            has_lunch = "Detected ✅" if "🥗 Likely Lunch" in df_final['Gap_Category'].values else "Not Found ❌"
-            st.metric("Lunch Break", has_lunch)
+            st.metric("Lunch Detection", "Detected ✅" if "🥗 Likely Lunch" in df_final['Gap_Category'].values else "Not Found ❌")
 
         st.markdown("---")
 
-        # --- LOG DETALLADO ---
-        # ... (Tu código de la tabla Audit Mode con el Styler de colores de texto) ...
+        # --- TABLA DE AUDITORÍA (RE-INSERTADA) ---
+        st.subheader("📋 Detailed Operational Log (Audit Mode)")
+        df_log = df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'num_str', 'Talk_Secs', 'In_Between_Idle', 'Gap_Category', 'is_repeat']].copy()
+        df_log['Date'] = df_log['Date_Only'].astype(str)
+        df_log['Start'] = df_log['Inicio_Mx'].dt.strftime('%H:%M:%S')
+        df_log['Finished'] = df_log['Fin_Mx'].dt.strftime('%H:%M:%S')
+        df_log['Talk'] = df_log['Talk_Secs'].apply(format_seconds)
+        df_log['Idle After'] = df_log['In_Between_Idle'].apply(format_seconds)
+        
+        final_table = df_log[['Date', 'Start', 'Finished', 'num_str', 'Talk', 'Idle After', 'Gap_Category', 'is_repeat']]
+        final_table.columns = ['Date', 'Start', 'Finished', 'Number', 'Talk', 'Idle After', 'Category', 'Repeated']
+
+        def style_audit_v2(row):
+            styles = [''] * len(row)
+            cols = list(final_table.columns)
+            if row['Repeated']: styles[cols.index('Number')] = 'color: #8b0000; font-weight: bold;'
+            cat = row['Category']
+            if "Standard Doc" in cat: styles[cols.index('Category')] = 'color: #28a745;'
+            elif "Micro-Gap" in cat: styles[cols.index('Category')] = 'color: #ffc107;'
+            elif "Extended Idle" in cat: styles[cols.index('Category')] = 'color: #fd7e14;'
+            elif "Operational Gap" in cat: styles[cols.index('Category')] = 'color: #dc3545; font-weight: bold;'
+            elif "🥗 Likely Lunch" in cat: styles[cols.index('Category')] = 'color: #6f42c1; font-weight: bold;'
+            return styles
+
+        st.dataframe(final_table.style.apply(style_audit_v2, axis=1), use_container_width=True, hide_index=True)
+
+    else:
+        st.warning("No data found.")
