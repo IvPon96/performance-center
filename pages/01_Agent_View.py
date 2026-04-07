@@ -1,19 +1,16 @@
-# v1.6 - The controlio update
+# v1.7 - Aesthetics & Adherence Update
 import streamlit as st
 import plotly.express as px
 import pandas as pd
 from data_engine import load_and_process, format_seconds
 
-# 1. Configuración de página
 st.set_page_config(page_title="Agent Audit Deep-Dive", layout="wide")
 
-# 2. Carga de datos
 data = load_and_process()
 
 if data is not None and not data.empty:
     st.sidebar.header("Navigation Center")
     
-    # Filtros de Agente y Resolución
     agent_list = sorted(data['Full_Name'].unique())
     agent_sel = st.sidebar.selectbox("Select Agent", agent_list)
     df_agent = data[data['Full_Name'] == agent_sel].copy()
@@ -33,7 +30,7 @@ if data is not None and not data.empty:
         avail_months = [m for m in months if m in df_agent['Month'].unique()]
         month_sel = st.sidebar.selectbox("Select Month", avail_months)
         df_final = df_agent[df_agent['Month'] == month_sel].copy()
-    else: # Quarterly
+    else: 
         quarters = sorted(df_agent['Quarter'].unique())
         q_sel = st.sidebar.selectbox("Select Quarter", quarters)
         df_final = df_agent[df_agent['Quarter'] == q_sel].copy()
@@ -43,16 +40,23 @@ if data is not None and not data.empty:
         st.markdown(f"**Status:** Analysis Level {view_level}")
         st.markdown("---")
 
-        # --- KPIs SUPERIORES ---
+        # --- KPIs SUPERIORES (CON ADHERENCIA) ---
         total_calls = len(df_final)
         talk_secs = df_final['Talk_Secs'].sum()
         idle_secs = df_final['Idle_Secs'].sum()
+        
+        # Cálculo de Adherencia: Accounted vs 9 horas teóricas por día trabajado
+        days_worked = df_final['Date_Only'].nunique()
+        theoretical_secs = days_worked * 32400  # 9 horas * 3600 seg
+        accounted_secs = talk_secs + idle_secs
+        adherence = (accounted_secs / theoretical_secs) * 100 if theoretical_secs > 0 else 0
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5) # Añadimos una 5ta columna
         c1.metric("Total Calls", total_calls)
         c2.metric("Total Talk Time", format_seconds(talk_secs))
         c3.metric("Total Idle Time", format_seconds(idle_secs))
-        c4.metric("Avg Talk Duration", f"{int(talk_secs/total_calls) if total_calls > 0 else 0}s")
+        c4.metric("Adherence", f"{adherence:.1f}%")
+        c5.metric("Avg Talk Duration", f"{int(talk_secs/total_calls) if total_calls > 0 else 0}s")
 
         st.markdown("---")
 
@@ -80,10 +84,9 @@ if data is not None and not data.empty:
 
         st.markdown("---")
 
-        # --- SECCIÓN: ATTENDANCE & READY GAP LOG (EL CORAZÓN DE LA V2.1) ---
-        st.subheader("🚪 Attendance & Ready-to-Work Log")
+        # --- SECCIÓN: ATTENDANCE & READY GAP LOG ---
+        # Eliminamos el primer subheader duplicado que estaba aquí
         
-        # Agrupamos por día para obtener la "verdad" de ambos sistemas
         attendance_log = df_final.groupby('Date_Only').agg(
             PC_Login=('login_dt', 'min'),
             Status=('Attendance_Status', 'first'),
@@ -94,7 +97,6 @@ if data is not None and not data.empty:
             EOS_Gap=('EOS_Idle', 'sum')
         ).reset_index()
 
-        # Formateo visual para la tabla
         attendance_log['Date'] = attendance_log['Date_Only'].astype(str)
         attendance_log['Login PC'] = attendance_log['PC_Login'].dt.strftime('%H:%M:%S').fillna("N/A")
         attendance_log['First Call'] = attendance_log['First_Call'].dt.strftime('%H:%M:%S')
@@ -102,31 +104,31 @@ if data is not None and not data.empty:
         attendance_log['SOS Gap'] = attendance_log['SOS_Gap'].apply(format_seconds)
         attendance_log['EOS Gap'] = attendance_log['EOS_Gap'].apply(format_seconds)
         
-        # Renombramos columnas para el usuario final
         final_table = attendance_log[['Date', 'Login PC', 'Status', 'First Call', 'Ready_Gap_Val', 'Last Call', 'SOS Gap', 'EOS Gap']]
         final_table.columns = ['Date', 'Login PC', 'Status', 'First Call', 'Ready Gap', 'Last Call', 'SOS Gap', 'EOS Gap']
 
-        # --- Función de Estilo (Añádela antes de mostrar la tabla) ---
-        def style_attendance(row):
-            color = ''
-            if row['Status'] == 'ON TIME':
-                color = 'background-color: #d4edda; color: #155724;' # Verde suave
-            elif row['Status'] == 'TARDY':
-                color = 'background-color: #fff3cd; color: #856404;' # Amarillo
-            elif row['Status'] == 'LATE':
-                color = 'background-color: #f8d7da; color: #721c24;' # Rojo suave
-            elif row['Status'] == 'NO LOG':
-                color = 'background-color: #e2e3e5; color: #383d41;' # Gris
-    
-            return [color if v == row['Status'] else '' for v in row]
+        # --- Función de Estilo (SOLO TEXTO) ---
+        def style_status_text(row):
+            styles = [''] * len(row) # Por defecto sin estilo
+            status_idx = final_table.columns.get_loc('Status') # Buscamos dónde está 'Status'
+            
+            val = row['Status']
+            if val == 'ON TIME':
+                styles[status_idx] = 'color: #28a745; font-weight: bold;' # Verde
+            elif val == 'TARDY':
+                styles[status_idx] = 'color: #ffc107; font-weight: bold;' # Ámbar
+            elif val == 'LATE':
+                styles[status_idx] = 'color: #dc3545; font-weight: bold;' # Rojo
+            elif val == 'NO LOG':
+                styles[status_idx] = 'color: #6c757d; font-weight: italic;' # Gris
+            
+            return styles
 
-        # Mostramos la tabla
         st.subheader("🚪 Attendance & Ready-to-Work Log")
 
-        # Aplicamos el estilo solo a la columna 'Status' para evitar colores accidentales en otras celdas
-        styled_table = final_table.style.apply(style_attendance, axis=1)
+        # Aplicamos el estilo solo al texto
+        styled_table = final_table.style.apply(style_status_text, axis=1)
 
-        # Usamos dataframe en lugar de table para permitir el estilo
         st.dataframe(styled_table, use_container_width=True, hide_index=True)
         
         st.caption("ℹ️ **Ready Gap:** Diferencia de tiempo entre el inicio de sesión en la PC (Controlio) y la primera llamada realizada (Dialpad).")
