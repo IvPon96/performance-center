@@ -1,134 +1,146 @@
-#v2.2 - Full Control Edition
+# V2.7
 import streamlit as st
 import plotly.express as px
 import pandas as pd
-import plotly.graph_objects as go
 from data_engine import load_and_process, format_seconds
 
-st.set_page_config(page_title="HITL Operations Center", layout="wide")
+st.set_page_config(page_title="Agent Audit Center PRO", layout="wide")
 
-# CSS Radar/Neon Premium
+# CSS Estilizado para métricas
 st.markdown("""
     <style>
-    .stMetric { background-color: #0e1117; border: 1px solid #00ff0033; padding: 15px; border-radius: 10px; }
-    [data-testid="stMetricValue"] { color: #00ff00; font-family: 'Courier New', monospace; text-shadow: 0 0 5px #00ff00; }
+    .stMetric { background-color: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.1); }
+    .stDataFrame { border-radius: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
+# 1. CARGA DEL DATA PACK (Diccionario del Engine v2.7)
 data_pack = load_and_process()
 
-if data_pack:
-    # --- FILTROS INDEPENDIENTES ---
-    st.sidebar.header("🕹️ Radar Controls")
-    view_level = st.sidebar.radio("Time Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
+# 2. VERIFICACIÓN Y EXTRACCIÓN
+if data_pack is not None:
+    data = data_pack['main'] # Extraemos el DataFrame principal de llamadas
     
-    df_raw = data_pack['main']
-    
-    # Lógica de filtrado específica para HITL View
-    if view_level == "Daily":
-        target_date = st.sidebar.date_input("Select Date", df_raw['Date_Only'].max())
-        df_hitl = df_raw[df_raw['Date_Only'] == target_date].copy()
-    elif view_level == "Weekly":
-        week_sel = st.sidebar.selectbox("Select Week", sorted(df_raw['Week_Label'].unique(), reverse=True))
-        df_hitl = df_raw[df_raw['Week_Label'] == week_sel].copy()
-    elif view_level == "Monthly":
-        month_sel = st.sidebar.selectbox("Select Month", sorted(df_raw['Month'].unique()))
-        df_hitl = df_raw[df_raw['Month'] == month_sel].copy()
+    if not data.empty:
+        st.sidebar.header("👤 Personal Radar")
+        
+        # Lista de agentes para el selector
+        agent_list = sorted(data['Full_Name'].unique())
+        agent_sel = st.sidebar.selectbox("Select Agent", agent_list)
+        
+        df_agent = data[data['Full_Name'] == agent_sel].copy()
+        
+        view_level = st.sidebar.radio("Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
+        
+        # --- FILTRADO DINÁMICO ---
+        if view_level == "Daily":
+            date_sel = st.sidebar.date_input("Select Day", df_agent['Date_Only'].max())
+            df_final = df_agent[df_agent['Date_Only'] == date_sel].copy()
+        elif view_level == "Weekly":
+            weeks = sorted(df_agent['Week_Label'].unique(), reverse=True)
+            df_final = df_agent[df_agent['Week_Label'] == st.sidebar.selectbox("Select Week", weeks)].copy()
+        elif view_level == "Monthly":
+            months = sorted(df_agent['Month'].unique())
+            df_final = df_agent[df_agent['Month'] == st.sidebar.selectbox("Select Month", months)].copy()
+        else:
+            df_final = df_agent[df_agent['Quarter'] == st.sidebar.selectbox("Select Quarter", sorted(df_agent['Quarter'].unique()))].copy()
+
+        if not df_final.empty:
+            st.title(f"👤 Individual Audit: {agent_sel}")
+
+            # --- KPI ROW SUPERIOR ---
+            talk_t = df_final['Talk_Secs'].sum()
+            idle_t = df_final['In_Between_Idle'].sum()
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Talk Time", format_seconds(talk_t))
+            c2.metric("Idle Time", format_seconds(idle_t))
+            c3.metric("Total Calls", len(df_final))
+            c4.metric("Repeated 🚨", len(df_final[df_final['is_repeat'] == True]))
+
+            st.markdown("---")
+
+            # --- FILA 1: DISTRIBUCIÓN Y FEED ---
+            col_l, col_r = st.columns([1, 1])
+            with col_l:
+                st.subheader("Time Distribution")
+                fig_p = px.pie(names=['Talk', 'Idle'], values=[talk_t, idle_t], hole=0.5, color_discrete_sequence=['#0066cc', '#E5E7E9'])
+                fig_p.update_layout(height=520, margin=dict(t=50, b=50, l=0, r=0))
+                st.plotly_chart(fig_p, use_container_width=True)
+            
+            with col_r:
+                st.subheader("📱 Activity Feed (Daily Scroll)")
+                days = sorted(df_final['Date_Only'].unique(), reverse=True)
+                with st.container(height=520):
+                    for d in days:
+                        d_data = df_final[df_final['Date_Only'] == d]
+                        st.markdown(f"**📅 {d.strftime('%A, %b %d')}**")
+                        fig_d = px.timeline(d_data, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
+                        fig_d.update_layout(height=150, margin=dict(t=5, b=35, l=0, r=10), 
+                                            yaxis_visible=False, xaxis=dict(showticklabels=True, dtick=3600000, tickformat="%H:%M"))
+                        st.plotly_chart(fig_d, use_container_width=True, config={'displayModeBar': False})
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            # --- FILA 2: TENDENCIA Y SALUD OPERATIVA ---
+            mid_l, mid_r = st.columns([2, 1])
+            with mid_r:
+                st.subheader("🎯 Operational Health")
+                crit_cats = ["Extended Idle", "Operational Gap"]
+                critical_gaps = len(df_final[df_final['Gap_Category'].isin(crit_cats)])
+                if critical_gaps > 0:
+                    st.warning(f"Detected {critical_gaps} Critical Gaps", icon="⚠️")
+                st.metric("Gaps Críticos (>15m)", critical_gaps, 
+                          delta="Review Required" if critical_gaps > 0 else "Normal", delta_color="inverse")
+                doc_df = df_final[df_final['Gap_Category'] == "Standard Doc"]
+                avg_doc = doc_df['In_Between_Idle'].mean() if not doc_df.empty else 0
+                st.metric("Avg Doc Time (Safe)", f"{int(avg_doc/60)}m {int(avg_doc%60)}s")
+                has_lunch = "Detected ✅" if "🥗 Likely Lunch" in df_final['Gap_Category'].values else "Not Found ❌"
+                st.metric("Lunch Break Status", has_lunch)
+
+            with mid_l:
+                if view_level == "Daily":
+                    st.subheader("📊 Frequency (15m Intervals)")
+                    freq_data = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
+                    fig_bar = px.bar(freq_data, x='15m_Interval', y='Calls', color_discrete_sequence=['#00cc96'])
+                else:
+                    st.subheader("📈 Daily Volume Trend")
+                    trend_data = df_final.groupby('Date_Only').size().reset_index(name='Calls')
+                    fig_bar = px.bar(trend_data, x='Date_Only', y='Calls', color_discrete_sequence=['#0066cc'])
+                fig_bar.update_layout(height=400)
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+            st.markdown("---")
+
+            # --- FILA 3: LOG DETALLADO CON BROKERS ---
+            st.subheader("📋 Detailed Operational Log")
+            df_log = df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'num_str', 'Broker_Name', 'Talk_Secs', 'In_Between_Idle', 'Gap_Category', 'is_repeat']].copy()
+            df_log['Start'] = df_log['Inicio_Mx'].dt.strftime('%H:%M:%S')
+            df_log['Finished'] = df_log['Fin_Mx'].dt.strftime('%H:%M:%S')
+            df_log['Talk'] = df_log['Talk_Secs'].apply(format_seconds)
+            df_log['Idle'] = df_log['In_Between_Idle'].apply(format_seconds)
+            
+            final_table = df_log[['Date_Only', 'Start', 'Finished', 'num_str', 'Broker_Name', 'Talk', 'Idle', 'Gap_Category', 'is_repeat']]
+            final_table.columns = ['Date', 'Start', 'Finished', 'Phone', 'Broker', 'Talk', 'Idle After', 'Category', 'Repeated']
+
+            def style_tactical(row):
+                styles = [''] * len(row)
+                cols = list(final_table.columns)
+                if row['Repeated']: styles[cols.index('Phone')] = 'color: #8b0000; font-weight: bold;'
+                cat = row['Category']
+                cat_idx = cols.index('Category')
+                if "Standard Doc" in cat: styles[cat_idx] = 'color: #28a745;'
+                elif "Micro-Gap" in cat: styles[cat_idx] = 'color: #ffc107;'
+                elif "Extended Idle" in cat: styles[cat_idx] = 'color: #fd7e14;'
+                elif "Operational Gap" in cat: styles[cat_idx] = 'color: #dc3545; font-weight: bold;'
+                elif "🥗 Likely Lunch" in cat: styles[cat_idx] = 'color: #6f42c1; font-weight: bold;'
+                return styles
+
+            st.dataframe(final_table.style.apply(style_tactical, axis=1), use_container_width=True, hide_index=True)
+        else:
+            st.warning("No hay datos para este periodo.")
     else:
-        df_hitl = df_raw[df_raw['Quarter'] == st.sidebar.selectbox("Select Quarter", sorted(df_raw['Quarter'].unique()))].copy()
-
-    df_retool = data_pack['retool']
-
-    st.title("🛰️ HITL - Operations Center")
-    
-    # --- KPI ROW ---
-    current_load = df_retool['Load_Count'].iloc[-1] if not df_retool.empty else 0
-    prev_load = df_retool['Load_Count'].iloc[-2] if len(df_retool) > 1 else current_load
-    
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Retool Pressure", int(current_load), delta=int(current_load - prev_load), delta_color="inverse")
-    k2.metric("Period Total Calls", f"{len(df_hitl):,}")
-    k3.metric("Total Talk Time", format_seconds(df_hitl['Talk_Secs'].sum()))
-    k4.metric("Total Decoys 🚨", f"{len(df_hitl[df_hitl['is_repeat'] == True]):,}")
-
-    st.markdown("---")
-
-    # --- REPLICANDO DIALPAD: CALL VOLUME OVER TIME ---
-    st.subheader("📈 Call Volume Trend (Dialpad Style)")
-    
-    # Agrupamos por fecha para ver la tendencia
-    trend_data = df_hitl.groupby('Date_Only').size().reset_index(name='Calls')
-    
-    fig_trend = go.Figure()
-    fig_trend.add_trace(go.Scatter(
-        x=trend_data['Date_Only'], 
-        y=trend_data['Calls'],
-        mode='lines+markers',
-        line=dict(color='#00ff00', width=3),
-        fill='tozeroy', # Shaded area como el de Dialpad
-        fillcolor='rgba(0, 255, 0, 0.1)',
-        marker=dict(size=8, color='#0e1117', line=dict(width=2, color='#00ff00'))
-    ))
-    
-    fig_trend.update_layout(
-        plot_bgcolor='black', paper_bgcolor='rgba(0,0,0,0)',
-        height=350, margin=dict(l=20, r=20, t=20, b=20),
-        xaxis=dict(showgrid=True, gridcolor='#1f1f1f', title="Timeline"),
-        yaxis=dict(showgrid=True, gridcolor='#1f1f1f', title="Volume")
-    )
-    st.plotly_chart(fig_trend, use_container_width=True)
-
-    st.markdown("---")
-
-    # --- EL MARCAPASOS (Heartbeat de Retool) ---
-    st.subheader("💓 Retool System Heartbeat")
-    if not df_retool.empty:
-        fig_heart = go.Figure()
-        fig_heart.add_trace(go.Scatter(
-            x=df_retool['Timestamp'], y=df_retool['Load_Count'],
-            mode='lines', line=dict(color='#00ff00', width=2, shape='spline'),
-            fill='tozeroy', fillcolor='rgba(0, 255, 0, 0.05)'
-        ))
-        fig_heart.update_layout(
-            plot_bgcolor='black', paper_bgcolor='rgba(0,0,0,0)', height=300,
-            xaxis=dict(rangeslider=dict(visible=True), gridcolor='#1f1f1f'),
-            yaxis=dict(gridcolor='#1f1f1f'), margin=dict(l=20, r=20, t=10, b=10)
-        )
-        st.plotly_chart(fig_heart, use_container_width=True)
-
-    st.markdown("---")
-
-    # --- RANKING & GAPS ---
-    c_rank, c_gaps = st.columns([2, 1])
-    
-    with c_rank:
-        st.subheader("🏆 Efficiency Ranking")
-        ranking = df_hitl.groupby('Full_Name').agg({
-            'Talk_Secs': 'sum', 'num_str': 'count', 'is_repeat': 'sum', 'Date_Only': 'nunique'
-        }).rename(columns={'Date_Only': 'Days'}).reset_index()
-        
-        ranking['Utilization'] = (ranking['Talk_Secs'] / (ranking['Days'] * 32400)) * 100
-        ranking = ranking.sort_values('Utilization', ascending=False)
-        
-        st.dataframe(ranking[['Full_Name', 'Utilization', 'num_str', 'is_repeat']], 
-                     column_config={
-                         "Full_Name": "Agent",
-                         "Utilization": st.column_config.ProgressColumn("% Engagement", format="%.1f%%", min_value=0, max_value=25),
-                         "num_str": "Calls", "is_repeat": "Decoys"
-                     }, use_container_width=True, hide_index=True)
-
-    with c_gaps:
-        st.subheader("⏱️ Team Gap Pulse")
-        gap_dist = df_hitl['Gap_Category'].value_counts().reset_index()
-        fig_gap = px.pie(gap_dist, names='Gap_Category', values='count', hole=0.6,
-                         color_discrete_sequence=['#00ff00', '#00cc00', '#009900', '#006600', '#8b0000'])
-        fig_gap.update_layout(height=400, showlegend=False, paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_gap, use_container_width=True)
-
-    # --- HEATMAP ---
-    st.markdown("---")
-    st.subheader("🔥 Operational Intensity Heatmap (15m Intervals)")
-    heatmap_data = df_hitl.groupby(['Full_Name', '15m_Interval']).size().reset_index(name='Calls')
-    fig_heat = px.density_heatmap(heatmap_data, x='15m_Interval', y='Full_Name', z='Calls',
-                                  color_continuous_scale=['#0e1117', '#00ff00'], text_auto=True)
-    st.plotly_chart(fig_heat, use_container_width=True)
+        st.error("El DataFrame principal está vacío.")
+else:
+    st.error("Error al cargar el Data Pack desde el Engine.")
