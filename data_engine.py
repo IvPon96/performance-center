@@ -1,4 +1,4 @@
-#v2.6.2 - FIXED: 15m Interval
+# v2.7 - Engine con Soporte para Retool History
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -19,21 +19,29 @@ def categorize_gap_strategic(seconds, is_max_gap):
 @st.cache_data(ttl=300)
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    GID_BROKERS = 'T606737505' 
+    GID_BROKERS = '606737505'
+    GID_RETOOL = '407336031' 
     
     try:
-        # 1. CARGA DE DATOS PRINCIPALES
+        # 1. CARGA DE TODAS LAS FUENTES
         df = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0")
         dim = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=1947121871")
         
-        # 2. CARGA DEL DIRECTORIO DE BROKERS
+        # Carga de Historial Retool
         try:
-            url_b = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}"
-            brokers = pd.read_csv(url_b)
+            retool_hist = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_RETOOL}")
+            retool_hist['Load_Count'] = retool_hist['Load_Count'].astype(str).str.extract('(\d+)').astype(float)
+            retool_hist['Timestamp'] = pd.to_datetime(retool_hist['Timestamp'].str.replace(' - ', ' '), errors='coerce')
+        except:
+            retool_hist = pd.DataFrame()
+
+        # Carga de Brokers
+        try:
+            brokers = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}")
             brokers['Clean_Phone'] = brokers['Clean_Phone'].astype(str).str.replace("'", "").str.strip()
             broker_map = brokers.set_index('Clean_Phone')['Broker_Name'].to_dict()
         except:
-            broker_map = {} 
+            broker_map = {}
 
         df.columns = df.columns.str.strip()
         dim.columns = dim.columns.str.strip()
@@ -63,7 +71,7 @@ def load_and_process():
         df['Week_End'] = df['Week_Start'] + pd.to_timedelta(6, unit='D')
         df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2) + " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
         
-        # 6. MAPPING DE BROKERS Y COLUMNA DE INTERVALOS (RESTAURADA)
+        # 6. MAPPING Y INTERVALOS
         df['15m_Interval'] = df['Inicio_Mx'].dt.floor('15min').dt.strftime('%H:%M')
         df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
         df['num_str'] = df['num_str'].str.strip()
@@ -72,7 +80,6 @@ def load_and_process():
         # 7. FILTROS Y GAPS
         df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
         df = df.sort_values(['Full_Name', 'Inicio_Mx'])
-        
         df['prev_num'] = df.groupby(['Full_Name', 'Date_Only'])['num_str'].shift()
         df['is_repeat'] = (df['num_str'] == df['prev_num']) & (df['num_str'] != '0')
         
@@ -84,7 +91,12 @@ def load_and_process():
         df['is_max_gap'] = (df['In_Between_Idle'] == df['max_gap_day']) & (df['In_Between_Idle'] > 2700)
         df['Gap_Category'] = df.apply(lambda x: categorize_gap_strategic(x['In_Between_Idle'], x['is_max_gap']), axis=1)
 
-        return df
+        # RETORNO MAESTRO
+        return {
+            'main': df,
+            'retool': retool_hist,
+            'broker_map': broker_map
+        }
 
     except Exception as e:
         st.error(f"Error Crítico en el Engine: {e}")
