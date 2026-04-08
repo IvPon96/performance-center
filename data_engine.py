@@ -1,4 +1,4 @@
-# v2.6.1 - Syntax Clean
+#v2.6.2 - FIXED: 15m Interval
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -19,7 +19,7 @@ def categorize_gap_strategic(seconds, is_max_gap):
 @st.cache_data(ttl=300)
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    GID_BROKERS = '606737505' 
+    GID_BROKERS = 'T606737505' 
     
     try:
         # 1. CARGA DE DATOS PRINCIPALES
@@ -30,11 +30,9 @@ def load_and_process():
         try:
             url_b = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}"
             brokers = pd.read_csv(url_b)
-            # Limpieza de comillas de Apps Script y espacios
             brokers['Clean_Phone'] = brokers['Clean_Phone'].astype(str).str.replace("'", "").str.strip()
             broker_map = brokers.set_index('Clean_Phone')['Broker_Name'].to_dict()
-        except Exception as e:
-            st.warning(f"Aviso: Directorio de Brokers no disponible ({e})")
+        except:
             broker_map = {} 
 
         df.columns = df.columns.str.strip()
@@ -65,7 +63,8 @@ def load_and_process():
         df['Week_End'] = df['Week_Start'] + pd.to_timedelta(6, unit='D')
         df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2) + " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
         
-        # 6. MAPPING DE BROKERS
+        # 6. MAPPING DE BROKERS Y COLUMNA DE INTERVALOS (RESTAURADA)
+        df['15m_Interval'] = df['Inicio_Mx'].dt.floor('15min').dt.strftime('%H:%M')
         df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
         df['num_str'] = df['num_str'].str.strip()
         df['Broker_Name'] = df['num_str'].map(broker_map).fillna("Unknown / New")
