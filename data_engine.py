@@ -1,4 +1,4 @@
-# v2.5 - Broker Intelligence Engine
+# v2.6 - Broker Intelligence Engine (Dual Column)
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -14,30 +14,32 @@ def categorize_gap_strategic(seconds, is_max_gap):
     if seconds <= 3600: return "Extended Idle"
     return "Operational Gap"
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300) # Reducido a 5 min para ver cambios de brokers más rápido
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
     # ⚠️ REEMPLAZA ESTE GID CON EL DE TU PESTAÑA BROKER_DIRECTORY
-    GID_BROKERS = 'TU_GID_AQUI' 
+    GID_BROKERS = '606737505' 
     
     try:
         # 1. CARGA DE DATOS PRINCIPALES
         df = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0")
         dim = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=1947121871")
         
-        # 2. CARGA DEL DIRECTORIO DE BROKERS (La pieza que faltaba)
+        # 2. CARGA DEL DIRECTORIO DE BROKERS
         try:
-            brokers = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}")
-            # Limpiamos el prefijo "'" de Apps Script
-            brokers['Clean_Phone'] = brokers['Clean_Phone'].astype(str).str.replace("'", "")
+            url_brokers = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}"
+            brokers = pd.read_csv(url_brokers)
+            # Limpieza profunda de los números del directorio
+            brokers['Clean_Phone'] = brokers['Clean_Phone'].astype(str).str.replace("'", "").str.strip()
             broker_map = brokers.set_index('Clean_Phone')['Broker_Name'].to_dict()
-        except:
+        except Exception as e:
+            st.warning(f"Directorio de Brokers no cargado: {e}")
             broker_map = {} 
 
         df.columns = df.columns.str.strip(); dim.columns = dim.columns.str.strip()
         
         # 3. MERGE CON DIM_AGENTS
-        df = df.merge(dim[['Master_Email', 'Full_Name', 'production_floor', 'Controlio_ID']], 
+        df = df.merge(dim[['Master_Email', 'Full_Name']], 
                       left_on='email', right_on='Master_Email', how='left')
         df['Full_Name'] = df['Full_Name'].fillna(df['name'])
         
@@ -62,16 +64,17 @@ def load_and_process():
         df['Week_End'] = df['Week_Start'] + pd.to_timedelta(6, unit='D')
         df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2) + " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
         
-        # 6. MAPPING DE IDENTIDAD (Soluciona el KeyError)
-        df['15m_Interval'] = df['Inicio_Mx'].dt.floor('15min').dt.strftime('%H:%M')
+        # 6. MAPPING DE BROKERS (Dos columnas)
         df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
+        df['num_str'] = df['num_str'].str.strip() # Quitar espacios
         
-        # Aquí se crea la columna que el View está buscando
-        df['Broker_Identity'] = df['num_str'].map(broker_map).fillna(df['num_str'])
+        # Columna de Nombre: Si no existe en el mapa, ponemos "Unknown / New"
+        df['Broker_Name'] = df['num_str'].map(broker_map).fillna("Unknown / New")
         
         # 7. FILTROS Y GAPS
         df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
         df = df.sort_values(['Full_Name', 'Inicio_Mx'])
+        
         df['prev_num'] = df.groupby(['Full_Name', 'Date_Only'])['num_str'].shift()
         df['is_repeat'] = (df['num_str'] == df['prev_num']) & (df['num_str'] != '0')
         
@@ -81,10 +84,4 @@ def load_and_process():
         
         df['max_gap_day'] = df.groupby(['Full_Name', 'Date_Only'])['In_Between_Idle'].transform('max')
         df['is_max_gap'] = (df['In_Between_Idle'] == df['max_gap_day']) & (df['In_Between_Idle'] > 2700)
-        df['Gap_Category'] = df.apply(lambda x: categorize_gap_strategic(x['In_Between_Idle'], x['is_max_gap']), axis=1)
-
-        return df
-
-    except Exception as e:
-        st.error(f"Error Crítico en el Engine: {e}")
-        return None
+        df['Gap_Category'] = df.apply(lambda
