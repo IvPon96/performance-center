@@ -22,8 +22,8 @@ if data_pack is not None:
     data = data_pack['main'] # Extraemos el DataFrame principal de llamadas
     
     if not data.empty:
-        st.sidebar.header("Operational Control")
-        agent_list = sorted(data['Full_Name'].unique())
+        st.sidebar.header("👤 Personal Radar")
+        agent_sel = st.sidebar.selectbox("Select Agent", sorted(data['Full_Name'].unique()))
         agent_sel = st.sidebar.selectbox("Select Agent", agent_list)
         df_agent = data[data['Full_Name'] == agent_sel].copy()
         
