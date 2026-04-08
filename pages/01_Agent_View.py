@@ -23,8 +23,13 @@ if data_pack is not None:
     
     if not data.empty:
         st.sidebar.header("👤 Personal Radar")
-        agent_sel = st.sidebar.selectbox("Select Agent", sorted(data['Full_Name'].unique()))
+
+        # DEFINIMOS la lista antes de usarla para que no haya NameError
+        agent_list = sorted(data['Full_Name'].unique())
+        
+        # Unn solo selector limpio
         agent_sel = st.sidebar.selectbox("Select Agent", agent_list)
+        
         df_agent = data[data['Full_Name'] == agent_sel].copy()
         
         view_level = st.sidebar.radio("Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
