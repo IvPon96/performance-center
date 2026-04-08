@@ -17,7 +17,8 @@ def categorize_gap_strategic(seconds, is_max_gap):
 @st.cache_data(ttl=300) # Reducido a 5 min para ver cambios de brokers más rápido
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    GID_BROKERS = '606737505' 
+    # ⚠️ REEMPLAZA ESTE GID CON EL DE TU PESTAÑA BROKER_DIRECTORY
+    GID_BROKERS = 'TU_GID_AQUI' 
     
     try:
         # 1. CARGA DE DATOS PRINCIPALES
@@ -83,4 +84,10 @@ def load_and_process():
         
         df['max_gap_day'] = df.groupby(['Full_Name', 'Date_Only'])['In_Between_Idle'].transform('max')
         df['is_max_gap'] = (df['In_Between_Idle'] == df['max_gap_day']) & (df['In_Between_Idle'] > 2700)
-        df['Gap_Category'] = df.apply(lambda
+        df['Gap_Category'] = df.apply(lambda x: categorize_gap_strategic(x['In_Between_Idle'], x['is_max_gap']), axis=1)
+
+        return df
+
+    except Exception as e:
+        st.error(f"Error Crítico en el Engine: {e}")
+        return None
