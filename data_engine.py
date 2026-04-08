@@ -17,21 +17,22 @@ def categorize_gap_strategic(seconds, is_max_gap):
 @st.cache_data(ttl=600)
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    GID_BROKERS = '606737505' 
+    # ⚠️ REEMPLAZA ESTE GID CON EL DE TU PESTAÑA BROKER_DIRECTORY
+    GID_BROKERS = 'TU_GID_AQUI' 
     
     try:
-        # 1. CARGA DE DATOS (Call Logs & Agents)
+        # 1. CARGA DE DATOS PRINCIPALES
         df = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0")
         dim = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=1947121871")
         
-        # 2. CARGA DEL DIRECTORIO DE BROKERS (Nuevo)
+        # 2. CARGA DEL DIRECTORIO DE BROKERS (La pieza que faltaba)
         try:
             brokers = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}")
-            # Limpiamos el prefijo "'" que pusimos en Apps Script para que Python lo lea bien
+            # Limpiamos el prefijo "'" de Apps Script
             brokers['Clean_Phone'] = brokers['Clean_Phone'].astype(str).str.replace("'", "")
             broker_map = brokers.set_index('Clean_Phone')['Broker_Name'].to_dict()
         except:
-            broker_map = {} # Por si la pestaña aún no tiene datos o el GID es incorrecto
+            broker_map = {} 
 
         df.columns = df.columns.str.strip(); dim.columns = dim.columns.str.strip()
         
@@ -40,7 +41,7 @@ def load_and_process():
                       left_on='email', right_on='Master_Email', how='left')
         df['Full_Name'] = df['Full_Name'].fillna(df['name'])
         
-        # 4. PROCESAMIENTO DE TIEMPOS
+        # 4. TIEMPOS Y OFFSETS
         df['date_started'] = pd.to_datetime(df['date_started'], errors='coerce')
         df['date_ended'] = pd.to_datetime(df['date_ended'], errors='coerce')
 
@@ -60,23 +61,17 @@ def load_and_process():
         df['Week_Start'] = df['Inicio_Mx'] - pd.to_timedelta(df['Inicio_Mx'].dt.dayofweek, unit='D')
         df['Week_End'] = df['Week_Start'] + pd.to_timedelta(6, unit='D')
         df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2) + " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
-        df['Quarter'] = df['Quarter'].fillna("Q-Unknown")
         
-        # 6. LÓGICA DE INTERVALOS Y MAPPING DE BROKERS
+        # 6. MAPPING DE IDENTIDAD (Soluciona el KeyError)
         df['15m_Interval'] = df['Inicio_Mx'].dt.floor('15min').dt.strftime('%H:%M')
-        
-        # Limpieza de números para auditoría
         df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
         
-        # --- EL MATCH MÁGICO ---
-        # Si el número existe en el diccionario, ponemos el nombre, si no, dejamos el número
+        # Aquí se crea la columna que el View está buscando
         df['Broker_Identity'] = df['num_str'].map(broker_map).fillna(df['num_str'])
         
-        # 7. FILTROS OPERATIVOS
+        # 7. FILTROS Y GAPS
         df = df[~df['categories'].fillna('').str.contains('Inbound', case=False)].copy()
         df = df.sort_values(['Full_Name', 'Inicio_Mx'])
-        
-        # 8. AUDITORÍA Y GAPS
         df['prev_num'] = df.groupby(['Full_Name', 'Date_Only'])['num_str'].shift()
         df['is_repeat'] = (df['num_str'] == df['prev_num']) & (df['num_str'] != '0')
         
