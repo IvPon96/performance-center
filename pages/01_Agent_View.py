@@ -124,20 +124,26 @@ if data is not None and not data.empty:
 
         # --- FILA 3: LOG DETALLADO AL FINAL ---
         st.subheader("📋 Detailed Operational Log (Audit Mode)")
-        df_log = df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'num_str', 'Talk_Secs', 'In_Between_Idle', 'Gap_Category', 'is_repeat']].copy()
+        # Agregamos 'Broker_Identity' a la selección
+        df_log = df_final[['Date_Only', 'Inicio_Mx', 'Fin_Mx', 'Broker_Identity', 'num_str', 'Talk_Secs', 'In_Between_Idle', 'Gap_Category', 'is_repeat']].copy()
+        
         df_log['Date'] = df_log['Date_Only'].astype(str)
         df_log['Start'] = df_log['Inicio_Mx'].dt.strftime('%H:%M:%S')
         df_log['Finished'] = df_log['Fin_Mx'].dt.strftime('%H:%M:%S')
         df_log['Talk'] = df_log['Talk_Secs'].apply(format_seconds)
         df_log['Idle After'] = df_log['In_Between_Idle'].apply(format_seconds)
         
-        final_table = df_log[['Date', 'Start', 'Finished', 'num_str', 'Talk', 'Idle After', 'Gap_Category', 'is_repeat']]
-        final_table.columns = ['Date', 'Start', 'Finished', 'Number', 'Talk', 'Idle After', 'Category', 'Repeated']
+        # Renombramos y ordenamos para la tabla final
+        final_table = df_log[['Date', 'Start', 'Finished', 'Broker_Identity', 'Talk', 'Idle After', 'Gap_Category', 'is_repeat']]
+        final_table.columns = ['Date', 'Start', 'Finished', 'Broker / Number', 'Talk', 'Idle After', 'Category', 'Repeated']
 
         def style_audit_final(row):
             styles = [''] * len(row)
             cols = list(final_table.columns)
-            if row['Repeated']: styles[cols.index('Number')] = 'color: #8b0000; font-weight: bold;'
+            # Resaltamos en rojo si es repetido
+            if row['Repeated']: 
+                styles[cols.index('Broker / Number')] = 'color: #8b0000; font-weight: bold;'
+            
             cat = row['Category']
             if "Standard Doc" in cat: styles[cols.index('Category')] = 'color: #28a745;'
             elif "Micro-Gap" in cat: styles[cols.index('Category')] = 'color: #ffc107;'
