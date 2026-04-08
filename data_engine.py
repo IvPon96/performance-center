@@ -1,24 +1,24 @@
-# v2.6 - Broker Intelligence Engine (Dual Column)
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
 
 def format_seconds(seconds):
+    """Convierte segundos a formato HH:MM:SS de forma segura"""
     if pd.isna(seconds) or seconds <= 0: return "0:00:00"
     return str(timedelta(seconds=int(seconds)))
 
 def categorize_gap_strategic(seconds, is_max_gap):
+    """Clasificación táctica de los silencios entre llamadas"""
     if seconds <= 180: return "Standard Doc"
     if seconds <= 900: return "Micro-Gap"
     if is_max_gap and seconds > 2700: return "🥗 Likely Lunch"
     if seconds <= 3600: return "Extended Idle"
     return "Operational Gap"
 
-@st.cache_data(ttl=300) # Reducido a 5 min para ver cambios de brokers más rápido
+@st.cache_data(ttl=300)
 def load_and_process():
     SHEET_ID = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    # ⚠️ REEMPLAZA ESTE GID CON EL DE TU PESTAÑA BROKER_DIRECTORY
-    GID_BROKERS = 'TU_GID_AQUI' 
+    GID_BROKERS = '606737505' 
     
     try:
         # 1. CARGA DE DATOS PRINCIPALES
@@ -27,20 +27,20 @@ def load_and_process():
         
         # 2. CARGA DEL DIRECTORIO DE BROKERS
         try:
-            url_brokers = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}"
-            brokers = pd.read_csv(url_brokers)
-            # Limpieza profunda de los números del directorio
+            url_b = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}"
+            brokers = pd.read_csv(url_b)
+            # Limpieza de comillas de Apps Script y espacios
             brokers['Clean_Phone'] = brokers['Clean_Phone'].astype(str).str.replace("'", "").str.strip()
             broker_map = brokers.set_index('Clean_Phone')['Broker_Name'].to_dict()
         except Exception as e:
-            st.warning(f"Directorio de Brokers no cargado: {e}")
+            st.warning(f"Aviso: Directorio de Brokers no disponible ({e})")
             broker_map = {} 
 
-        df.columns = df.columns.str.strip(); dim.columns = dim.columns.str.strip()
+        df.columns = df.columns.str.strip()
+        dim.columns = dim.columns.str.strip()
         
         # 3. MERGE CON DIM_AGENTS
-        df = df.merge(dim[['Master_Email', 'Full_Name']], 
-                      left_on='email', right_on='Master_Email', how='left')
+        df = df.merge(dim[['Master_Email', 'Full_Name']], left_on='email', right_on='Master_Email', how='left')
         df['Full_Name'] = df['Full_Name'].fillna(df['name'])
         
         # 4. TIEMPOS Y OFFSETS
@@ -64,11 +64,9 @@ def load_and_process():
         df['Week_End'] = df['Week_Start'] + pd.to_timedelta(6, unit='D')
         df['Week_Label'] = 'W' + df['Week_Number'].astype(str).str.zfill(2) + " (" + df['Week_Start'].dt.strftime('%b %d') + " - " + df['Week_End'].dt.strftime('%b %d') + ")"
         
-        # 6. MAPPING DE BROKERS (Dos columnas)
+        # 6. MAPPING DE BROKERS
         df['num_str'] = df['external_number'].fillna(0).apply(lambda x: str(int(float(x))) if str(x).replace('.','').isdigit() else str(x))
-        df['num_str'] = df['num_str'].str.strip() # Quitar espacios
-        
-        # Columna de Nombre: Si no existe en el mapa, ponemos "Unknown / New"
+        df['num_str'] = df['num_str'].str.strip()
         df['Broker_Name'] = df['num_str'].map(broker_map).fillna("Unknown / New")
         
         # 7. FILTROS Y GAPS
