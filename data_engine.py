@@ -1,4 +1,4 @@
-# v2.7 - Engine con Soporte para Retool History
+# v2.7 clean
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -91,7 +91,6 @@ def load_and_process():
         df['is_max_gap'] = (df['In_Between_Idle'] == df['max_gap_day']) & (df['In_Between_Idle'] > 2700)
         df['Gap_Category'] = df.apply(lambda x: categorize_gap_strategic(x['In_Between_Idle'], x['is_max_gap']), axis=1)
 
-        # RETORNO MAESTRO
         return {
             'main': df,
             'retool': retool_hist,
