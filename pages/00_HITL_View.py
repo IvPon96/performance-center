@@ -1,14 +1,12 @@
-# v2.5 Radar blindado
+# v2.7 
 import streamlit as st
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
 from data_engine import load_and_process, format_seconds
 
-# 1. Configuración de página
 st.set_page_config(page_title="HITL Operations Center", layout="wide")
 
-# 2. CSS Estilo Radar Neón
 st.markdown("""
     <style>
     .stMetric { background-color: #0e1117; border: 1px solid #00ff0033; padding: 15px; border-radius: 10px; }
@@ -17,14 +15,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 3. Carga de datos desde el Engine v2.7
 data_pack = load_and_process()
 
 if data_pack:
     df_raw = data_pack['main']
     df_retool = data_pack['retool']
     
-    # --- SIDEBAR: FILTROS INDEPENDIENTES ---
     st.sidebar.header("🕹️ Radar Controls")
     view_level = st.sidebar.radio("Time Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
     
@@ -51,11 +47,8 @@ if data_pack:
         trend_x = 'Date_Only'
         trend_title = "Historical Call Volume Trend"
 
-    # --- TÍTULO PRINCIPAL ---
     st.title("🛰️ HITL - Operations Center")
-    st.markdown(f"### Current View: {view_level}")
     
-    # --- KPI ROW: OPERATIONAL PULSE ---
     current_load = df_retool['Load_Count'].iloc[-1] if not df_retool.empty else 0
     prev_load = df_retool['Load_Count'].iloc[-2] if len(df_retool) > 1 else current_load
     
@@ -67,9 +60,8 @@ if data_pack:
 
     st.markdown("---")
 
-    # --- 📈 TENDENCIA DINÁMICA (ESTILO DIALPAD) ---
-    st.subheader(trend_title)
     if not df_hitl.empty:
+        st.subheader(trend_title)
         trend_data = df_hitl.groupby(trend_x).size().reset_index(name='Calls')
         if trend_x == '15m_Interval':
             trend_data = trend_data.sort_values(trend_x)
@@ -91,7 +83,6 @@ if data_pack:
 
     st.markdown("---")
 
-    # --- 💓 RETOOL HEARTBEAT (SHARP ANALYSIS) ---
     st.subheader("💓 Retool System Heartbeat")
     if not df_retool.empty:
         fig_heart = go.Figure()
@@ -105,4 +96,38 @@ if data_pack:
             xaxis=dict(rangeslider=dict(visible=True), gridcolor='#1f1f1f', tickformat='%H:%M'),
             yaxis=dict(gridcolor='#1f1f1f'), margin=dict(l=20, r=20, t=10, b=10)
         )
-        st.plotly_chart(fig_heart, use
+        st.plotly_chart(fig_heart, use_container_width=True)
+
+    st.markdown("---")
+
+    c_broker, c_dist = st.columns([2, 1])
+    if not df_hitl.empty:
+        with c_broker:
+            st.subheader("🏢 Most Contacted Brokers")
+            broker_rank = df_hitl['Broker_Name'].value_counts().reset_index()
+            broker_rank.columns = ['Broker', 'Calls']
+            with st.container(height=400):
+                st.dataframe(broker_rank, 
+                             column_config={
+                                 "Broker": "Broker Name",
+                                 "Calls": st.column_config.ProgressColumn("Volume", format="%d", min_value=0, max_value=int(broker_rank['Calls'].max()))
+                             }, use_container_width=True, hide_index=True)
+
+        with c_dist:
+            st.subheader("🌐 Broker Coverage")
+            top_5 = broker_rank.head(5)
+            fig_pie = px.pie(top_5, names='Broker', values='Calls', hole=0.6,
+                             color_discrete_sequence=px.colors.sequential.Greens_r)
+            fig_pie.update_layout(height=400, showlegend=False, paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("🔥 Operational Intensity Heatmap")
+    if not df_hitl.empty:
+        heatmap_data = df_hitl.groupby(['Full_Name', '15m_Interval']).size().reset_index(name='Calls')
+        heatmap_data = heatmap_data.sort_values('15m_Interval')
+        fig_heat = px.density_heatmap(heatmap_data, x='15m_Interval', y='Full_Name', z='Calls',
+                                      color_continuous_scale=['#0e1117', '#00ff00'], text_auto=True)
+        fig_heat.update_xaxes(type='category', categoryorder='array', 
+                              categoryarray=sorted(heatmap_data['15m_Interval'].unique()))
+        st.plotly_chart(fig_heat, use_container_width=True)
