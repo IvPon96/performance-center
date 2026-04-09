@@ -32,9 +32,16 @@ def load_and_process():
             retool_hist = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_RETOOL}")
             retool_hist['Load_Count'] = retool_hist['Load_Count'].astype(str).str.extract('(\d+)').astype(float)
             retool_hist['Timestamp'] = pd.to_datetime(retool_hist['Timestamp'].str.replace(' - ', ' '), errors='coerce')
+            
+            # NUEVO: Filtro de horario operativo (7 AM a 5 PM)
+            retool_hist = retool_hist[
+                (retool_hist['Timestamp'].dt.hour >= 7) & 
+                (retool_hist['Timestamp'].dt.hour <= 17)
+            ].copy()
+            
         except:
             retool_hist = pd.DataFrame()
-
+        
         # Carga de Brokers
         try:
             brokers = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_BROKERS}")
