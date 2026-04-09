@@ -89,11 +89,22 @@ if data_pack:
         fig_heart.add_trace(go.Scatter(
             x=df_retool['Timestamp'], y=df_retool['Load_Count'],
             mode='lines+markers', line=dict(color='#00ff00', width=2),
-            marker=dict(size=4), fill='tozeroy', fillcolor='rgba(0, 255, 0, 0.05)'
+            marker=dict(size=4), fill='tozeroy', fillcolor='rgba(0, 255, 0, 0.05)',
+            connectgaps=False # <--- IMPORTANTE: No conectar si hay saltos
         ))
+        
         fig_heart.update_layout(
             plot_bgcolor='black', paper_bgcolor='rgba(0,0,0,0)', height=300,
-            xaxis=dict(rangeslider=dict(visible=True), gridcolor='#1f1f1f', tickformat='%H:%M'),
+            xaxis=dict(
+                rangeslider=dict(visible=True), 
+                gridcolor='#1f1f1f', 
+                tickformat='%H:%M',
+                # NUEVO: Rangebreaks para ocultar las horas de la noche (17:00 a 07:00)
+                rangebreaks=[
+                    dict(bounds=[17, 7], pattern="hour"), # Salta de las 5pm a las 7am
+                    dict(bounds=["sat", "mon"]) # Opcional: Salta los fines de semana
+                ]
+            ),
             yaxis=dict(gridcolor='#1f1f1f'), margin=dict(l=20, r=20, t=10, b=10)
         )
         st.plotly_chart(fig_heart, use_container_width=True)
