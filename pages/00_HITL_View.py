@@ -1,4 +1,4 @@
-# |v2.8 - Center of Command
+# v2.8.1 - Stable
 import streamlit as st
 import plotly.express as px
 import pandas as pd
@@ -49,8 +49,8 @@ if data_pack:
     k4.metric("Total Decoys 🚨", f"{len(df_hitl[df_hitl['is_repeat'] == True]):,}")
 
     st.markdown("---")
-
-    # TENDENCIA DIALPAD
+    
+    # Gráfico Dialpad Style
     st.subheader("📈 Call Volume Trend")
     trend_data = df_hitl.groupby(trend_x).size().reset_index(name='Calls')
     fig_trend = go.Figure()
@@ -59,8 +59,8 @@ if data_pack:
     st.plotly_chart(fig_trend, use_container_width=True)
 
     st.markdown("---")
-
-    # HEARTBEAT
+    
+    # Heartbeat
     st.subheader("💓 Retool System Heartbeat")
     if not df_retool.empty:
         fig_heart = go.Figure()
@@ -69,25 +69,10 @@ if data_pack:
         st.plotly_chart(fig_heart, use_container_width=True)
 
     st.markdown("---")
-
-    # BROKER RANKING
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        st.subheader("🏢 Most Contacted Brokers")
-        broker_rank = df_hitl['Broker_Name'].value_counts().reset_index()
-        broker_rank.columns = ['Broker', 'Calls']
-        with st.container(height=400):
-            st.dataframe(broker_rank, column_config={"Calls": st.column_config.ProgressColumn("Volume", min_value=0, max_value=int(broker_rank['Calls'].max()))}, use_container_width=True, hide_index=True)
-
-    with c2:
-        st.subheader("🌐 Broker Coverage")
-        fig_pie = px.pie(broker_rank.head(5), names='Broker', values='Calls', hole=0.6, color_discrete_sequence=px.colors.sequential.Greens_r)
-        fig_pie.update_layout(height=400, showlegend=False, paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-    # FRICKTION RADAR (NUEVO)
-    st.markdown("---")
-    st.subheader("🚨 High Friction Analysis (Allen Lund Warning)")
+    
+    # Radar de Fricción (Allen Lund Detector)
+    st.subheader("🚨 High Friction Analysis (Market Resistance)")
+    # Identifica números con más de 2 intentos en el periodo
     friction = df_hitl.groupby(['num_str', 'Broker_Name']).agg({'daily_attempts': 'max', 'Talk_Secs': 'sum'}).reset_index().sort_values('daily_attempts', ascending=False)
     friction = friction[friction['daily_attempts'] > 2].head(10)
-    st.dataframe(friction, column_config={"daily_attempts": "Daily Attempts", "Talk_Secs": "Total Talk"}, use_container_width=True, hide_index=True)
+    st.dataframe(friction, column_config={"num_str": "Phone", "daily_attempts": "Intents today", "Talk_Secs": "Total Talk"}, use_container_width=True, hide_index=True)
