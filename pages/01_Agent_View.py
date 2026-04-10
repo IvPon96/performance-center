@@ -116,34 +116,51 @@ if data_pack:
 
             st.markdown("---")
 
-            # --- FILA 4: LOG DETALLADO (CORREGIDO) ---
+# --- FILA 4: LOG DETALLADO (AUDIT MODE CON COLORES COMPLETOS) ---
             st.subheader("📋 Detailed Operational Log (Audit Mode)")
             
-            # 1. Seleccionamos columnas reales del DF
+            # 1. Selección de datos
             df_log = df_final[['Date_Only', 'Inicio_Mx', 'num_str', 'Broker_Name', 'Talk_Secs', 'In_Between_Idle', 'daily_attempts', 'Gap_Category']].copy()
             
-            # 2. Creamos las columnas formateadas
+            # 2. Formateo de tiempos
             df_log['Start'] = df_log['Inicio_Mx'].dt.strftime('%H:%M:%S')
             df_log['Talk'] = df_log['Talk_Secs'].apply(format_seconds)
             df_log['Idle'] = df_log['In_Between_Idle'].apply(format_seconds)
             
-            # 3. Seleccionamos las columnas definitivas para la tabla usando sus nombres internos actuales
+            # 3. Selección y Renombramiento de columnas para la visualización
             final_table = df_log[['Date_Only', 'Start', 'num_str', 'Broker_Name', 'Talk', 'Idle', 'daily_attempts', 'Gap_Category']].copy()
-            
-            # 4. AHORA SÍ, renombramos para la visualización final
             final_table.columns = ['Date', 'Start', 'Phone', 'Broker', 'Talk', 'Idle After', 'Attempt #', 'Category']
 
+            # 4. FUNCIÓN DE ESTILO TÁCTICO (Restaurada al 100%)
             def style_tactical(row):
                 styles = [''] * len(row)
                 cols = list(final_table.columns)
+                
+                # --- Estilo para Intentos (Fricción) ---
                 att = row['Attempt #']
-                if att > 5: styles[cols.index('Attempt #')] = 'background-color: rgba(255,0,0,0.2); color: #ff4b4b; font-weight: bold;'
-                elif att > 2: styles[cols.index('Attempt #')] = 'color: #ffa500; font-weight: bold;'
+                if att > 5: 
+                    styles[cols.index('Attempt #')] = 'background-color: rgba(255,0,0,0.2); color: #ff4b4b; font-weight: bold;'
+                elif att > 2: 
+                    styles[cols.index('Attempt #')] = 'color: #ffa500; font-weight: bold;'
+                
+                # --- Estilo para Categorías (Gaps) ---
                 cat = row['Category']
-                if "Operational Gap" in cat: styles[cols.index('Category')] = 'color: #dc3545; font-weight: bold;'
-                elif "🥗 Likely Lunch" in cat: styles[cols.index('Category')] = 'color: #6f42c1; font-weight: bold;'
+                cat_idx = cols.index('Category')
+                
+                if "Standard Doc" in cat:
+                    styles[cat_idx] = 'color: #28a745;' # Verde
+                elif "Micro-Gap" in cat:
+                    styles[cat_idx] = 'color: #ffc107;' # Amarillo/Dorado
+                elif "Extended Idle" in cat:
+                    styles[cat_idx] = 'color: #fd7e14;' # Naranja
+                elif "Operational Gap" in cat:
+                    styles[cat_idx] = 'color: #dc3545; font-weight: bold;' # Rojo
+                elif "🥗 Likely Lunch" in cat:
+                    styles[cat_idx] = 'color: #6f42c1; font-weight: bold;' # Morado
+                
                 return styles
 
+            # 5. Renderizado final de la tabla
             st.dataframe(final_table.style.apply(style_tactical, axis=1), use_container_width=True, hide_index=True)
 
         else:
@@ -151,4 +168,4 @@ if data_pack:
     else:
         st.error("El DataFrame principal está vacío.")
 else:
-    st.error("Error al cargar el Data Pack.")
+    st.error("Error al cargar el Data Pack desde el Engine.")
