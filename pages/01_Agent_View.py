@@ -1,4 +1,4 @@
-#v2.9 - Broker Focus Edition
+# v2.9.1 - Submarine Command Edition
 import streamlit as st
 import plotly.express as px
 import pandas as pd
@@ -26,6 +26,7 @@ if data_pack:
         
         view_level = st.sidebar.radio("Resolution", ["Daily", "Weekly", "Monthly", "Quarterly"])
         
+        # --- FILTRADO DINÁMICO ---
         if view_level == "Daily":
             date_sel = st.sidebar.date_input("Select Day", df_agent['Date_Only'].max())
             df_final = df_agent[df_agent['Date_Only'] == date_sel].copy()
@@ -41,7 +42,7 @@ if data_pack:
         if not df_final.empty:
             st.title(f"👤 Individual Audit: {agent_sel}")
 
-            # --- KPI ROW ---
+            # --- KPI ROW SUPERIOR ---
             talk_t = df_final['Talk_Secs'].sum()
             idle_t = df_final['In_Between_Idle'].sum()
             c1, c2, c3, c4 = st.columns(4)
@@ -52,11 +53,12 @@ if data_pack:
 
             st.markdown("---")
 
-            # --- FILA 1: DISTRIBUCIÓN Y FEED ---
+            # --- FILA 1: DISTRIBUCIÓN Y FEED (1:1) ---
             col_l, col_r = st.columns([1, 1])
             with col_l:
                 st.subheader("Time Distribution")
-                fig_p = px.pie(names=['Talk', 'Idle'], values=[talk_t, idle_t], hole=0.5, color_discrete_sequence=['#0066cc', '#E5E7E9'])
+                fig_p = px.pie(names=['Talk', 'Idle'], values=[talk_t, idle_t], hole=0.5, 
+                               color_discrete_sequence=['#0066cc', '#E5E7E9'])
                 fig_p.update_layout(height=450, margin=dict(t=30, b=30, l=0, r=0))
                 st.plotly_chart(fig_p, use_container_width=True)
             with col_r:
@@ -66,50 +68,14 @@ if data_pack:
                     for d in days:
                         d_data = df_final[df_final['Date_Only'] == d]
                         st.markdown(f"**📅 {d.strftime('%A, %b %d')}**")
-                        fig_d = px.timeline(d_data, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", color_discrete_sequence=['#0066cc'])
+                        fig_d = px.timeline(d_data, x_start="Inicio_Mx", x_end="Fin_Mx", y="Full_Name", 
+                                            color_discrete_sequence=['#0066cc'])
                         fig_d.update_layout(height=150, margin=dict(t=5, b=35, l=0, r=10), yaxis_visible=False, xaxis=dict(showticklabels=True, dtick=3600000, tickformat="%H:%M"))
                         st.plotly_chart(fig_d, use_container_width=True, config={'displayModeBar': False})
 
             st.markdown("---")
 
-            # --- FILA 2: SALUD Y TOP BROKERS ---
-            mid_l, mid_r = st.columns([1, 1])
-            
-            with mid_l:
-                st.subheader("🎯 Operational Health")
-                critical_gaps = len(df_final[df_final['Gap_Category'].isin(["Extended Idle", "Operational Gap"])])
-                if critical_gaps > 0: st.warning(f"Detected {critical_gaps} Critical Gaps", icon="⚠️")
-                
-                h1, h2 = st.columns(2)
-                h1.metric("Gaps Críticos (>15m)", critical_gaps, delta="Review Required" if critical_gaps > 0 else "Normal", delta_color="inverse")
-                doc_df = df_final[df_final['Gap_Category'] == "Standard Doc"]
-                avg_doc = doc_df['In_Between_Idle'].mean() if not doc_df.empty else 0
-                h2.metric("Avg Doc Time", f"{int(avg_doc/60)}m {int(avg_doc%60)}s")
-                
-                has_lunch = "Detected ✅" if "🥗 Likely Lunch" in df_final['Gap_Category'].values else "Not Found ❌"
-                st.metric("Lunch Break Status", has_lunch)
-
-            with mid_r:
-                st.subheader("🏢 Primary Targets (Top 3 Dialed)")
-                # Cálculo de Top 3
-                top_brokers = df_final.groupby(['num_str', 'Broker_Name']).agg({
-                    'daily_attempts': 'count',
-                    'Talk_Secs': 'sum'
-                }).reset_index().sort_values('daily_attempts', ascending=False).head(3)
-                
-                top_brokers['Talk_Time'] = top_brokers['Talk_Secs'].apply(format_seconds)
-                
-                st.dataframe(top_brokers[['Broker_Name', 'num_str', 'daily_attempts', 'Talk_Time']], 
-                             column_config={
-                                 "Broker_Name": "Broker",
-                                 "num_str": "Phone",
-                                 "daily_attempts": "Total Dials",
-                                 "Talk_Time": "Talk"
-                             }, use_container_width=True, hide_index=True)
-
-            st.markdown("---")
-
-            # --- FILA 3: FRECUENCIA ---
+            # --- FILA 2 (NUEVA POSICIÓN): FRECUENCIA/DAILY VOL ---
             st.subheader("📊 Call Frequency Trend")
             if view_level == "Daily":
                 freq_data = df_final.groupby('15m_Interval').size().reset_index(name='Calls')
@@ -117,8 +83,49 @@ if data_pack:
             else:
                 trend_data = df_final.groupby('Date_Only').size().reset_index(name='Calls')
                 fig_bar = px.bar(trend_data, x='Date_Only', y='Calls', color_discrete_sequence=['#0066cc'])
-            fig_bar.update_layout(height=300)
+            fig_bar.update_layout(height=350)
             st.plotly_chart(fig_bar, use_container_width=True)
+
+            st.markdown("---")
+
+            # --- FILA 3 (NUEVA POSICIÓN): SALUD Y BROKER MARKET SHARE ---
+            mid_l, mid_r = st.columns([1, 1])
+            
+            with mid_l:
+                st.subheader("🎯 Operational Health")
+                critical_gaps = len(df_final[df_final['Gap_Category'].isin(["Extended Idle", "Operational Gap"])])
+                if critical_gaps > 0: st.warning(f"Detected {critical_gaps} Critical Gaps", icon="⚠️")
+                
+                st.metric("Gaps Críticos (>15m)", critical_gaps, delta="Review Required" if critical_gaps > 0 else "Normal", delta_color="inverse")
+                
+                doc_df = df_final[df_final['Gap_Category'] == "Standard Doc"]
+                avg_doc = doc_df['In_Between_Idle'].mean() if not doc_df.empty else 0
+                st.metric("Avg Doc Time", f"{int(avg_doc/60)}m {int(avg_doc%60)}s")
+                
+                has_lunch = "Detected ✅" if "🥗 Likely Lunch" in df_final['Gap_Category'].values else "Not Found ❌"
+                st.metric("Lunch Break Status", has_lunch)
+
+            with mid_r:
+                # Restaurado y Expandido: Broker Market Share con Scroll
+                st.subheader("🏢 Brokers Dialed (Historical Contact List)")
+                
+                # Cálculo de TODOS los brokers (no solo Top 3)
+                all_brokers = df_final.groupby(['num_str', 'Broker_Name']).agg({
+                    'daily_attempts': 'count',
+                    'Talk_Secs': 'sum'
+                }).reset_index().sort_values('daily_attempts', ascending=False)
+                
+                all_brokers['Talk_Time'] = all_brokers['Talk_Secs'].apply(format_seconds)
+                
+                # Contenedor con altura fija para scroll
+                with st.container(height=450):
+                    st.dataframe(all_brokers[['Broker_Name', 'num_str', 'daily_attempts', 'Talk_Time']], 
+                                 column_config={
+                                     "Broker_Name": "Broker / Source",
+                                     "num_str": "Phone Number",
+                                     "daily_attempts": "Total Dials",
+                                     "Talk_Time": "Total Talk"
+                                 }, use_container_width=True, hide_index=True)
 
             st.markdown("---")
 
@@ -129,7 +136,7 @@ if data_pack:
             df_log['Talk'] = df_log['Talk_Secs'].apply(format_seconds)
             df_log['Idle'] = df_log['In_Between_Idle'].apply(format_seconds)
             
-            final_table = df_log[['Date_Only', 'Start', 'num_str', 'Broker_Name', 'Talk', 'Idle', 'daily_attempts', 'Gap_Category']]
+            final_table = df_log[['Date_Only', 'Start', 'Phone', 'Broker', 'Talk', 'Idle After', 'Attempt #', 'Category']]
             final_table.columns = ['Date', 'Start', 'Phone', 'Broker', 'Talk', 'Idle After', 'Attempt #', 'Category']
 
             def style_tactical(row):
@@ -141,6 +148,14 @@ if data_pack:
                 
                 cat = row['Category']
                 if "Operational Gap" in cat: styles[cols.index('Category')] = 'color: #dc3545; font-weight: bold;'
+                elif "🥗 Likely Lunch" in cat: styles[cols.index('Category')] = 'color: #6f42c1; font-weight: bold;'
                 return styles
 
             st.dataframe(final_table.style.apply(style_tactical, axis=1), use_container_width=True, hide_index=True)
+
+        else:
+            st.warning("No hay datos para el periodo seleccionado.")
+    else:
+        st.error("El DataFrame principal está vacío.")
+else:
+    st.error("Error al cargar el Data Pack.")
