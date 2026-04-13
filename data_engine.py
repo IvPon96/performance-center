@@ -1,4 +1,4 @@
-# v2.8.1 - Engine con Friction Intelligence (Fixed Temporal Columns)
+# v2.8.2 - Conteo por miles
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
@@ -28,10 +28,20 @@ def load_and_process():
         # Historial Retool
         try:
             retool_hist = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_RETOOL}")
-            retool_hist['Load_Count'] = retool_hist['Load_Count'].astype(str).str.extract('(\d+)').astype(float)
+            
+            # Limpiamos comas ANTES de extraer los dígitos
+            retool_hist['Load_Count'] = (
+                retool_hist['Load_Count']
+                .astype(str)
+                .str.replace(',', '', regex=False) # Eliminamos la coma de los miles
+                .str.extract('(\d+)')              # Extraemos el número completo (ej. 1168)
+                .astype(float)
+            )
+            
             retool_hist['Timestamp'] = pd.to_datetime(retool_hist['Timestamp'].str.replace(' - ', ' '), errors='coerce')
             retool_hist = retool_hist[(retool_hist['Timestamp'].dt.hour >= 7) & (retool_hist['Timestamp'].dt.hour <= 17)].copy()
-        except:
+        except Exception as e:
+            st.warning(f"Error procesando Retool: {e}")
             retool_hist = pd.DataFrame()
         
         # Brokers
