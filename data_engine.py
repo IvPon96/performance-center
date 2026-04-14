@@ -1,5 +1,4 @@
-# v3.0.1 - Neural Backbone Engine (Fixed IDs & GIDs)
-import streamlit as st
+# v3.1 - Neural Backbone (KPI Integration)import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
 
@@ -18,17 +17,19 @@ def categorize_gap_strategic(seconds, is_max_gap):
 @st.cache_data(ttl=300)
 def load_and_process():
     # --- NODOS DEL BACKBONE (Tus nuevos IDs) ---
-    ID_DIALPAD = '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
+    ID_DIALPAD =    '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
     ID_OPERATIONS = '1ErDaaU5FzCdCtm-RU2PVI_AlrBAP-PVvJZBD30-g_jg'
-    ID_CONTROLIO = '1gOFk2uFrwQliUlp5CXH9r_-S-fLKyheD7Cvtj5BxVuM'
-    ID_AGENTS = '1M54DEMKmX2RMpaI1RS22EqGL788xSIFDu9WfXylszzM'
+    ID_CONTROLIO =  '1gOFk2uFrwQliUlp5CXH9r_-S-fLKyheD7Cvtj5BxVuM'
+    ID_AGENTS =     '1M54DEMKmX2RMpaI1RS22EqGL788xSIFDu9WfXylszzM'
+    ID_KPI_MASTER = '1M54DEMKmX2RMpaI1RS22EqGL788xSIFDu9WfXylszzM'
     
     # GIDs ACTUALIZADOS (v3.0)
-    GID_DIALPAD = '0'
-    GID_RETOOL = '0'             # En tu nuevo link de Operaciones es 0
-    GID_BROKERS = '1404284367'   # GID de la pestaña de Brokers
-    GID_AGENTS = '0'             # En tu nuevo link de DIM_Agents es 0
-    GID_CONTROLIO = '0'
+    GID_DIALPAD =    '0'
+    GID_RETOOL =     '0'          # En tu nuevo link de Operaciones es 0
+    GID_BROKERS =    '1404284367' # GID de la pestaña de Brokers
+    GID_AGENTS =     '0'          # En tu nuevo link de DIM_Agents es 0
+    GID_CONTROLIO =  '0'
+    GID_KPI_Master = '65869073'
 
     try:
         # 1. CARGA DE NODOS (Con manejo de errores individual para debug)
@@ -40,6 +41,15 @@ def load_and_process():
             dim = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{ID_AGENTS}/export?format=csv&gid={GID_AGENTS}")
         except Exception as e: raise Exception(f"Error en Agents DIM: {e}")
 
+        # Carga de Metas KPI
+        try:
+            # Usamos la variable GID_KPI_Master que definiste arriba
+            kpi_goals = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{ID_KPI_MASTER}/export?format=csv&gid={GID_KPI_Master}")
+        except Exception as e:
+            st.warning(f"Aviso: Metas KPI no disponibles ({e})")
+            kpi_goals = pd.DataFrame()
+
+        # Carga de Retool_History
         try:
             retool_hist = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{ID_OPERATIONS}/export?format=csv&gid={GID_RETOOL}")
             # Fix de miles
@@ -110,9 +120,10 @@ def load_and_process():
         df['Gap_Category'] = df.apply(lambda x: categorize_gap_strategic(x['In_Between_Idle'], x['is_max_gap']), axis=1)
 
         return {
-            'main': df, 
-            'retool': retool_hist, 
-            'broker_map': broker_map
+            'main':       df, 
+            'retool':     retool_hist, 
+            'broker_map': broker_map,
+            'kpi_goals':  kpi_goals
         }
 
     except Exception as e:
