@@ -7,7 +7,7 @@ from data_engine import load_and_process, format_seconds
 st.set_page_config(page_title="HITL Performance Center", layout="wide")
 
 def password_entered():
-    if st.session_state["password"] == "TruckSmarter2026":
+    if st.session_state["password"] == "dashboard2026":
         st.session_state["password_correct"] = True
         del st.session_state["password"]
     else:
