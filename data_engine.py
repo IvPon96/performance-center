@@ -2,6 +2,10 @@
 import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 # --- FUNCIONES DE SOPORTE ---
 def format_seconds(seconds):
@@ -18,11 +22,11 @@ def categorize_gap_strategic(seconds, is_max_gap):
 @st.cache_data(ttl=300)
 def load_and_process():
     # --- NODOS DEL BACKBONE (Tus nuevos IDs) ---
-    ID_DIALPAD =    '1lUjfPzxBRQpko3CcNYSAWsEurNvP9hE4c7XAUkxyY3E'
-    ID_OPERATIONS = '1ErDaaU5FzCdCtm-RU2PVI_AlrBAP-PVvJZBD30-g_jg'
-    ID_CONTROLIO =  '1gOFk2uFrwQliUlp5CXH9r_-S-fLKyheD7Cvtj5BxVuM'
-    ID_AGENTS =     '1M54DEMKmX2RMpaI1RS22EqGL788xSIFDu9WfXylszzM'
-    ID_KPI_MASTER = '1M54DEMKmX2RMpaI1RS22EqGL788xSIFDu9WfXylszzM'
+    ID_DIALPAD =    os.getenv("ID_DIALPAD")
+    ID_OPERATIONS = os.getenv("ID_OPERATIONS")
+    ID_CONTROLIO =  os.getenv("ID_CONTROLIO")
+    ID_AGENTS =     os.getenv("ID_AGENTS")
+    ID_KPI_MASTER = os.getenv("ID_KPI_MASTER")
     
     # GIDs ACTUALIZADOS (v3.0)
     GID_DIALPAD =    '0'
