@@ -30,7 +30,7 @@ def check_password():
 if check_password():
     data = load_and_process()
     
-    if data is not None and not data.empty:
+    if data is not None and len(data) > 0:
         st.title("📊 HITL Performance Center - Fleet Overview")
         st.markdown("---")
 
