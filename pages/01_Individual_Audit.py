@@ -6,15 +6,6 @@ from data_engine import load_and_process, format_seconds
 
 st.set_page_config(page_title="Individual Execution Audit", layout="wide")
 
-# CSS Minimalista Corporativo (Igual que Global Operations)
-st.markdown("""
-    <style>
-    .stMetric { background-color: #f8f9fa; border-left: 4px solid #1f77b4; padding: 15px; border-radius: 5px; box-shadow: 1px 1px 3px rgba(0,0,0,0.1); }
-    [data-testid="stMetricValue"] { color: #2c3e50; font-family: 'Helvetica Neue', sans-serif; font-weight: 600; }
-    h1, h2, h3 { color: #2c3e50; }
-    </style>
-""", unsafe_allow_html=True)
-
 data_pack = load_and_process()
 
 if data_pack:
