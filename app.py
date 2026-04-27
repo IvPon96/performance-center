@@ -37,7 +37,6 @@ with col2:
                 - Pandas
                 - Google Sheets (ETL Source)
                 - Github + CodeSpaces
-                - Claude as advisor
                 """)
     
     st.markdown("---")
