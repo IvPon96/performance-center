@@ -1,5 +1,6 @@
 # 📊 Performance Center
 Dashboard operativo para equipos BPO construido con Python y Stramlit.
+🔗 [Ver app en vivo](https://performance-center-gvypmznhdhc7erc6kuaieb.streamlit.app/)
 
 ## El problema
 Los datos de la operación vivían en un Google Sheets: Un solo usuario a la vez, lento, y sin visibilidad real sobre cómo los agentes distribuían su tiempo. No había forma de ver —literalmente— qué pasaba entre llamadas.
