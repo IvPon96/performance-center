@@ -7,6 +7,7 @@
 ![Pandas](https://img.shields.io/badge/Pandas-Data_Manipulation-150458.svg)
 ![Plotly](https://img.shields.io/badge/Plotly-Data_Visualization-3F4F75.svg)
 
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Profile-0A66C2?logo=linkedin)](https://www.linkedin.com/in/ivan-ponce-rodriguez-8640832ba)
 ---
 
 ## 📖 The Context & The Problem
@@ -55,5 +56,7 @@ The application runs on a robust backend architecture:
 By deploying this engine, operations managers transitioned from reactive, "feeling-based" management to **data-driven leadership**. The dashboard successfully exposed redundant behaviors, allowing management to recalibrate KPIs and increase the actual productive capacity of the team without increasing headcount.
 
 ---
-Built with data engineering principles by Iván.
-[Connect in LinkedIn](www.linkedin.com/in/ivan-ponce-rodriguez-8640832ba)
+### 📬 Let's Connect!
+*Built with data engineering principles by [Iván Ponce Rodríguez](https://www.linkedin.com/in/ivan-ponce-rodriguez-8640832ba).*
+
+Feel free to reach out on LinkedIn if you want to discuss data analytics, operations optimization, or this project!
