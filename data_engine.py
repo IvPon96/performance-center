@@ -39,24 +39,24 @@ def load_and_process():
     try:
         # 1. CARGA DE NODOS (Con manejo de errores individual para debug)
         try:
-            df = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{ID_DIALPAD}/export?format=csv&gid={GID_DIALPAD}")
+            df = pd.read_excel("data/clean/DB_Dialpad.xlsx", sheet_name="DB_Dialpad")
         except Exception as e: raise Exception(f"Error en Dialpad DB: {e}")
 
         try:
-            dim = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{ID_AGENTS}/export?format=csv&gid={GID_AGENTS}")
+            dim = pd.read_excel("data/clean/DIM_Agents.xlsx", sheet_name="DIM_Agents")
         except Exception as e: raise Exception(f"Error en Agents DIM: {e}")
 
         # Carga de Metas KPI
         try:
             # Usamos la variable GID_KPI_Master que definiste arriba
-            kpi_goals = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{ID_KPI_MASTER}/export?format=csv&gid={GID_KPI_Master}")
+            kpi_goals = pd.read_excel("data/clean/DIM_Agents.xlsx", sheet_name="KPI_Master")
         except Exception as e:
             st.warning(f"Aviso: Metas KPI no disponibles ({e})")
             kpi_goals = pd.DataFrame()
 
         # Carga de Retool_History
         try:
-            retool_hist = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{ID_OPERATIONS}/export?format=csv&gid={GID_RETOOL}")
+            retool_hist = pd.read_excel("data/clean/DB_Operations.xlsx", sheet_name="Retool_history")
             # Fix de miles
             retool_hist['Load_Count'] = (
                 retool_hist['Load_Count'].astype(str)
@@ -69,7 +69,7 @@ def load_and_process():
             retool_hist = pd.DataFrame()
 
         try:
-            brokers = pd.read_csv(f"https://docs.google.com/spreadsheets/d/{ID_OPERATIONS}/export?format=csv&gid={GID_BROKERS}")
+            brokers = pd.read_excel("data/clean/DB_Operations.xlsx", sheet_name="Broker_Directory")
             brokers['Clean_Phone'] = brokers['Clean_Phone'].astype(str).str.replace("'", "").str.strip()
             broker_map = brokers.set_index('Clean_Phone')['Broker_Name'].to_dict()
         except Exception as e:
