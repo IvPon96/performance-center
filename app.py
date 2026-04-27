@@ -5,7 +5,7 @@ load_dotenv()
 
 st.set_page_config(page_title="BPO OPS Center", layout="wide")
 
-st.title("📊 BPO Ops Center — Live Demo")
+st.title("📊 BPO OPS Center — Live Demo")
 st.markdown("---")
 
 st.markdown("""
