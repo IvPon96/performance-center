@@ -41,3 +41,18 @@ The application runs on a robust backend architecture:
 1. Clone the repository:
    ```bash
    git clone [https://github.com/IvPon96/performance-center.git](https://github.com/IvPon96/performance-center.git)
+
+2. Navigate to the project directory:
+    cd performance-center
+
+3. Install dependencies:
+    pip install -r requirements.txt
+
+4. Run the Streamlit application
+    streamlit run app.py
+
+## 🧠 Impact & Results
+By deploying this engine, operations managers transitioned from reactive, "feeling-based" management to **data-driven leadership**. The dashboard successfully exposed redundant behaviors, allowing management to recalibrate KPIs and increase the actual productive capacity of the team without increasing headcount.
+
+---
+Built with data engineering principles by Iván.
