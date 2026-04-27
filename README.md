@@ -56,3 +56,4 @@ By deploying this engine, operations managers transitioned from reactive, "feeli
 
 ---
 Built with data engineering principles by Iván.
+[Connect in LinkedIn](www.linkedin.com/in/ivan-ponce-rodriguez-8640832ba)
