@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 
-st.set_page_config(page_title="BPO Ops Center", layout="wide")
+st.set_page_config(page_title="BPO OPS Center", layout="wide")
 
 st.title("📊 BPO Ops Center — Live Demo")
 st.markdown("---")
