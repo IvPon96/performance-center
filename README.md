@@ -1,41 +1,43 @@
-# 📊 Performance Center
-Dashboard operativo para equipos BPO construido con Python y Stramlit.
-🔗 [Ver app en vivo](https://performance-center-gvypmznhdhc7erc6kuaieb.streamlit.app/)
+# 🌐 Global Operations Center | Analytics Engine
 
-## El problema
-Los datos de la operación vivían en un Google Sheets: Un solo usuario a la vez, lento, y sin visibilidad real sobre cómo los agentes distribuían su tiempo. No había forma de ver —literalmente— qué pasaba entre llamadas.
+> A real-time data monitoring and behavioral analytics system built to track system workloads, optimize team execution, and detect operational bottlenecks in a BPO environment.
 
-## ¿Qué hace?
-Dos vistas complementarias que juntas da una imagen completa de la operación:
+![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.20+-FF4B4B.svg)
+![Pandas](https://img.shields.io/badge/Pandas-Data_Manipulation-150458.svg)
+![Plotly](https://img.shields.io/badge/Plotly-Data_Visualization-3F4F75.svg)
 
-**Operations View (General)**
-- Carga de trabajo por intervalos de 15 minutos
-- Eficacia del equipo por día
-- Mapa de calor de actividad por hora
-- Números más marcados por el equipo
+---
 
-**Agent View (Individual)**
-- Llamadas por agente por día
-- Talk time vs idle time
-- Patrones de marcación
-- Periodos de desconexión
+## 📖 The Context & The Problem
+In outsourced operations (BPO), managing a team's productivity often feels like operating a "black box". The standard metrics (total calls, total hours) are easy to manipulate and fail to show the true quality of the effort. 
 
-Ambas vistas comparten la misma lógica de datos con granularidad configurable: día, semana, mes y trimestre. La vista diaria funciona como una lupa; la semanal/mensual/trimestral como la vista completa.
-Esto permite implementar KPIs de capacidad operativa basados en tiempo libre real vs carga de trabajo disponible
+**The main challenges were:**
+1. **Redundant Efforts:** Agents repeatedly contacting unresponsive entities to inflate their volume metrics.
+2. **Disconnected Data:** Workloads lived in one system (Inbound Queue), execution lived in another (Telephony/Outreach), and attendance in another.
+3. **Behavioral Blind Spots:** Inability to correlate system pressure (high workload) with team pacing (idle times).
 
-## Stack
-- Python + Streamlit (Visualización)
-- Plotly Express (timelines y mapas de calor)
-- Google Sheets (base de datos operativa)
-- Google Apps Script + Automa (automatización ETL)
-- Github + Codespaces (desarrollo y versionamiento)
+## 💡 The Solution
+I built the **Global Operations Center**, a comprehensive full-stack analytics application using Python and Streamlit. It acts as an operational radar that shifts the focus from *quantity* of work to *quality* of execution.
 
-## Lo que aprendí construyendolo:
-La parte más dificil fue hacer que la vista general y la vista individual hablaran el mismo idioma. La solución fue migrar toda la lógica y matemáticas a un 'data_engine.py' centralizado que nutre ambas vistas con los mismos cálculos.
+### ✨ Key Features
+* **The "Neural Backbone" Engine:** A custom data-processing module that simultaneously fetches, cleans, and merges data from three different disconnected sources in milliseconds.
+* **Workload vs. Execution Tracking:** Side-by-side historical trend analysis to ensure team output correlates with system demands.
+* **Bottleneck Detection (High Friction Radar):** An algorithm that identifies entities receiving excessive outreach attempts with minimal productive time, saving hours of wasted labor.
+* **Behavioral Audit Profiles:** Individual drill-down dashboards that detect patterns like "IVR camping" or strategic idle times during peak workload hours.
 
-Si lo empezara hoy, comenzaría por definir qué quiero ver antes de escribir una sola línea de código.
+## 🏗️ Architecture & Data Pipeline
+The application runs on a robust backend architecture:
+1. **Extraction:** Automated extraction of daily operational logs via secure endpoints.
+2. **Transformation:** - Complex datetime manipulation (Timezone offsets, DST adjustments).
+   - Regex cleaning of numeric fields and string parsing.
+   - Categorization of operational gaps (e.g., differentiating scheduled breaks from unexplained idle time).
+3. **Load & Visualization:** Interactive, state-managed UI components rendered via Streamlit and Plotly.
 
-## Autor
-Iván Ponce - Team leader en transición a Analytics Engineer
-[LinkedIn](www.linkedin.com/in/ivan-ponce-rodriguez-8640832ba)
+*(Note: All data in this repository has been thoroughly anonymized through a custom ETL pipeline to protect sensitive corporate information while preserving mathematical correlations).*
 
+## 🚀 How to Run Locally
+
+1. Clone the repository:
+   ```bash
+   git clone [https://github.com/IvPon96/performance-center.git](https://github.com/IvPon96/performance-center.git)
